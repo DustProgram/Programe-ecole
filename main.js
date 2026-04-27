@@ -1,6 +1,7 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron')
 const path = require('path')
 const fs   = require('fs')
+const { autoUpdater } = require('electron-updater')
 
 let win
 
@@ -10,7 +11,7 @@ function createWindow() {
     height: 800,
     minWidth: 900,
     minHeight: 600,
-    title: 'Base de Prix & DPGF',
+    title: 'Base de Prix',
     icon: path.join(__dirname, 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -21,14 +22,20 @@ function createWindow() {
   })
   win.loadFile('index.html')
   win.setMenuBarVisibility(false)
+
+  // Lancer la vérification de mise à jour 5 sec après le démarrage
+  // (laisse le temps à l'app de se charger sans gêner l'utilisateur)
+  setTimeout(() => {
+    if (!app.isPackaged) return // pas en dev, uniquement en production
+    autoUpdater.checkForUpdates().catch(err => {
+      console.log('Vérification mise à jour échouée (silencieux):', err.message)
+    })
+  }, 5000)
 }
 
-// ── Helper : restaure le focus à la fenêtre après une dialog Windows ──
-// Bug Electron/Windows : après showOpenDialog/showSaveDialog, le focus
-// reste "flottant" et le clavier ne réécrit plus dans l'app.
+// Helper : restaure le focus à la fenêtre après une dialog Windows
 function restoreFocus() {
   if (!win || win.isDestroyed()) return
-  // Double appel pour forcer Windows à libérer le focus de la dialog
   setImmediate(() => {
     if (win && !win.isDestroyed()) {
       win.focus()
@@ -36,6 +43,47 @@ function restoreFocus() {
     }
   })
 }
+
+// ── AUTO-UPDATE ──
+// Configuration : on ne télécharge pas automatiquement, on demande d'abord
+autoUpdater.autoDownload = false
+
+autoUpdater.on('update-available', async (info) => {
+  const result = await dialog.showMessageBox(win, {
+    type: 'info',
+    title: 'Mise à jour disponible',
+    message: `Une nouvelle version (${info.version}) est disponible !`,
+    detail: 'Voulez-vous la télécharger et l\'installer maintenant ?\n\n' +
+            'Le téléchargement se fera en arrière-plan, vous pourrez continuer à utiliser l\'application.\n\n' +
+            'Une fois prêt, l\'application redémarrera pour finaliser l\'installation.',
+    buttons: ['Plus tard', 'Télécharger maintenant'],
+    defaultId: 1,
+    cancelId: 0
+  })
+  if (result.response === 1) {
+    autoUpdater.downloadUpdate()
+  }
+})
+
+autoUpdater.on('update-downloaded', async (info) => {
+  const result = await dialog.showMessageBox(win, {
+    type: 'info',
+    title: 'Mise à jour prête',
+    message: `La mise à jour ${info.version} a été téléchargée.`,
+    detail: 'L\'application va redémarrer pour terminer l\'installation.',
+    buttons: ['Redémarrer maintenant', 'Plus tard'],
+    defaultId: 0,
+    cancelId: 1
+  })
+  if (result.response === 0) {
+    autoUpdater.quitAndInstall()
+  }
+})
+
+autoUpdater.on('error', (err) => {
+  // Silencieux : ne pas embêter l'utilisateur si la vérification échoue (pas d'internet, etc.)
+  console.log('Auto-update error (silencieux):', err.message)
+})
 
 app.whenReady().then(createWindow)
 
@@ -47,6 +95,7 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow()
 })
 
+// ── IPC : ouverture de fichier ──
 ipcMain.handle('open-file', async (e, filters) => {
   const result = await dialog.showOpenDialog(win, {
     title: 'Ouvrir un fichier',
@@ -79,7 +128,6 @@ ipcMain.handle('read-file', async (e, filePath) => {
   return buffer.toString('base64')
 })
 
-// Écriture avec gestion d'erreur (fichier ouvert dans Excel par ex.)
 ipcMain.handle('write-file', async (e, { filePath, data }) => {
   try {
     const buffer = Buffer.from(data, 'base64')
@@ -115,3 +163,18 @@ ipcMain.handle('file-exists', async (e, filePath) => {
 ipcMain.handle('file-mtime', async (e, filePath) => {
   try { return fs.statSync(filePath).mtimeMs } catch { return null }
 })
+
+// ── IPC : Vérification manuelle de mise à jour (depuis Paramètres) ──
+ipcMain.handle('check-for-updates', async () => {
+  try {
+    const result = await autoUpdater.checkForUpdates()
+    if (result && result.updateInfo && result.updateInfo.version !== app.getVersion()) {
+      return { hasUpdate: true, version: result.updateInfo.version, current: app.getVersion() }
+    }
+    return { hasUpdate: false, current: app.getVersion() }
+  } catch (e) {
+    return { hasUpdate: false, error: e.message, current: app.getVersion() }
+  }
+})
+
+ipcMain.handle('get-app-version', () => app.getVersion())
