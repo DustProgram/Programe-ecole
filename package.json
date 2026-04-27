@@ -32,8 +32,8 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "TON_PSEUDO",
-        "repo": "baseprix",
+        "owner": "DustProgram",
+        "repo": "Programe-ecole",
         "releaseType": "release"
       }
     ],
