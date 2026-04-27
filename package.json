@@ -1,0 +1,41 @@
+{
+  "name": "base-de-prix",
+  "version": "2.0.0",
+  "description": "Outil de gestion de base de prix et DPGF",
+  "main": "main.js",
+  "author": "EURL PROMORAME",
+  "license": "MIT",
+  "scripts": {
+    "start":  "electron .",
+    "build":  "electron-builder --win --x64",
+    "buildmac": "electron-builder --mac"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.0.0"
+  },
+  "build": {
+    "appId": "com.baseprix.app",
+    "productName": "Base de Prix",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "index.html",
+      "main.js",
+      "preload.js",
+      "icon.png"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Base de Prix"
+    }
+  }
+}

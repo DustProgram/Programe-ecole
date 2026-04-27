@@ -1,0 +1,2790 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Base de Prix & DPGF</title>
+<!-- xlsx-js-style : pour la lecture des prix -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+<!-- JSZip : pour le ZIP-patching chirurgical (préserve macros + mise en forme à 100%) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bleu:#1e3a5f;--bleu2:#2d6a9f;--vert:#27ae60;--orange:#e67e22;
+  --rouge:#c0392b;--violet:#8e44ad;--gris:#ecf0f1;--bord:#dde3ea;--bg:#f4f6f9
+}
+html,body{height:100%}
+body{font-family:'Segoe UI',Arial,sans-serif;font-size:13px;color:#2c3e50;background:var(--bg);
+     display:flex;flex-direction:column;overflow:hidden}
+
+/* ── NAV ── */
+nav{background:var(--bleu);color:#fff;display:flex;align-items:center;padding:0 12px;
+    height:48px;gap:2px;flex-shrink:0;flex-wrap:nowrap;overflow-x:auto}
+.nav-title{font-size:15px;font-weight:700;margin-right:10px;white-space:nowrap;
+           display:inline-flex;align-items:center;gap:8px}
+.logo-svg{width:30px;height:30px;flex-shrink:0;filter:drop-shadow(0 1px 2px rgba(0,0,0,.3))}
+.logo-txt{letter-spacing:.3px;background:linear-gradient(180deg,#fff 60%,#cbd9e8);
+          -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.nav-btn{background:none;border:none;color:rgba(255,255,255,.8);padding:5px 10px;
+         cursor:pointer;border-radius:4px;font-size:11px;white-space:nowrap}
+.nav-btn:hover,.nav-btn.active{background:rgba(255,255,255,.18);color:#fff}
+.nav-actions{margin-left:auto;display:flex;gap:6px;flex-shrink:0;align-items:center}
+
+/* ── Bandeau de liaison Excel ── */
+.link-bar{background:#0e2540;color:#fff;padding:6px 14px;font-size:11px;display:flex;
+          align-items:center;gap:10px;border-bottom:1px solid #000;flex-shrink:0}
+.link-bar.linked{background:#0f5b3a}
+.link-bar.unlinked{background:#7a3030}
+.link-bar .lb-status{font-weight:700;letter-spacing:.3px}
+.link-bar .lb-path{flex:1;font-family:'Consolas',monospace;font-size:10px;opacity:.85;
+                   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.link-bar button{background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.25);
+                 border-radius:3px;padding:3px 9px;font-size:10px;cursor:pointer;font-weight:700}
+.link-bar button:hover{background:rgba(255,255,255,.28)}
+
+/* ── App layout ── */
+.app{display:flex;flex:1;overflow:hidden;min-height:0}
+.sidebar{width:200px;background:#fff;border-right:1px solid var(--bord);overflow-y:auto;flex-shrink:0}
+.sb-sep{padding:5px 12px;font-size:10px;font-weight:700;color:#999;text-transform:uppercase;
+        letter-spacing:.5px;background:var(--gris)}
+.sb-item{padding:7px 12px;cursor:pointer;border-left:3px solid transparent;font-size:12px;
+         display:flex;align-items:center;gap:5px}
+.sb-item:hover{background:var(--gris)}
+.sb-item.active{border-left-color:var(--bleu2);background:#e8f0fb;font-weight:700;color:var(--bleu)}
+.sb-count{margin-left:auto;font-size:10px;color:#999;font-weight:400}
+
+.main{flex:1;overflow-y:auto;padding:16px;min-height:0}
+.page{display:none}
+.page.active{display:block}
+.card{background:#fff;border:1px solid var(--bord);border-radius:8px;padding:14px;margin-bottom:14px}
+.card-title{font-size:13px;font-weight:700;color:var(--bleu);margin-bottom:10px;
+            display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
+
+/* ── Stats ── */
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+.stat-card{background:#fff;border:1px solid var(--bord);border-radius:7px;padding:12px;text-align:center}
+.stat-val{font-size:22px;font-weight:700;color:var(--bleu)}
+.stat-lbl{font-size:10px;color:#888;margin-top:3px;text-transform:uppercase;letter-spacing:.5px}
+
+/* ── Forms ── */
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+label{display:block;font-size:11px;font-weight:600;color:#555;margin-bottom:2px}
+input,select,textarea{width:100%;border:1px solid var(--bord);border-radius:4px;padding:5px 8px;
+                      font-size:12px;font-family:inherit;outline:none;background:#fff}
+input:focus,select:focus,textarea:focus{border-color:var(--bleu2);box-shadow:0 0 0 2px rgba(45,106,159,.15)}
+input[type="number"]{text-align:right}
+
+/* ── Buttons ── */
+.btn{border:none;border-radius:5px;padding:6px 14px;cursor:pointer;font-size:11px;font-weight:700;
+     font-family:inherit;white-space:nowrap;transition:opacity .12s}
+.btn:hover{opacity:.85}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-bleu{background:var(--bleu);color:#fff}
+.btn-vert{background:var(--vert);color:#fff}
+.btn-orange{background:var(--orange);color:#fff}
+.btn-rouge{background:var(--rouge);color:#fff}
+.btn-violet{background:var(--violet);color:#fff}
+.btn-gris{background:#95a5a6;color:#fff}
+.btn-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+
+/* ── Info bars ── */
+.info{padding:7px 11px;border-radius:4px;font-size:11px;margin:6px 0}
+.info-vert{background:#d4edda;color:#085041;border:1px solid #a0c8a8}
+.info-bleu{background:#dbeeff;color:#0c3a7a;border:1px solid #aaccee}
+.info-orange{background:#fff3cd;color:#856404;border:1px solid #f0ad4e}
+.info-rouge{background:#f8d7da;color:#721c24;border:1px solid #e08a8a}
+
+/* ── Tables ── */
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:11px}
+th{background:var(--bleu);color:#fff;padding:7px 8px;text-align:left;font-weight:700;
+   white-space:nowrap;position:sticky;top:0}
+td{padding:6px 8px;border-bottom:1px solid var(--bord);vertical-align:middle}
+tr:nth-child(even) td{background:#f8fafc}
+tr:hover td{background:#edf3fc}
+
+/* ── Badges ── */
+.badge{display:inline-block;border-radius:8px;padding:2px 8px;font-size:10px;font-weight:700}
+.badge-vert{background:#d4edda;color:#085041}
+.badge-rouge{background:#f8d7da;color:#721c24}
+.badge-orange{background:#fff3cd;color:#856404}
+.badge-bleu{background:#dbeeff;color:#0c3a7a}
+
+/* ── Search row ── */
+.srch-row{display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+.srch-row input,.srch-row select{flex:1;min-width:140px}
+
+/* ── MODAL (focus-friendly) ── */
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;
+          align-items:center;justify-content:center}
+.modal-bg.open{display:flex}
+.modal{background:#fff;border-radius:10px;padding:18px;width:90%;max-width:680px;
+       max-height:88vh;overflow-y:auto;box-shadow:0 8px 30px rgba(0,0,0,.3)}
+.modal-title{font-size:14px;font-weight:700;color:var(--bleu);margin-bottom:12px;
+             padding-bottom:8px;border-bottom:1px solid var(--bord)}
+.modal-foot{display:flex;gap:8px;justify-content:flex-end;margin-top:14px;
+            padding-top:10px;border-top:1px solid var(--bord);flex-wrap:wrap}
+
+/* ── Repère picker (modal sélection) ── */
+.rep-list{max-height:280px;overflow-y:auto;border:1px solid var(--bord);border-radius:5px}
+.rep-hdr{display:grid;grid-template-columns:90px 1fr 55px 90px;gap:6px;padding:6px 8px;
+         background:var(--bleu);color:#fff;font-size:10px;font-weight:700;border-radius:5px 5px 0 0}
+.rep-item{display:grid;grid-template-columns:90px 1fr 55px 90px;gap:6px;padding:7px 8px;
+          cursor:pointer;border-bottom:1px solid var(--bord);font-size:11px;font-family:'Consolas',monospace}
+.rep-item:hover{background:#edf3fc}
+.rep-item.sel{background:var(--bleu);color:#fff}
+
+/* ── DPGF rows ── */
+.dpgf-section-hdr{background:#0e2540;color:#fff;padding:6px 10px;font-size:11px;
+                  font-weight:700;border-radius:4px;margin:10px 0 4px;display:flex;
+                  align-items:center;gap:8px}
+.dpgf-hdr{display:grid;grid-template-columns:60px 1fr 45px 55px 110px 95px 80px 60px 70px;
+          gap:4px;padding:6px;background:var(--bleu);color:#fff;font-size:10px;font-weight:700;
+          border-radius:4px 4px 0 0;align-items:center;position:sticky;top:0;z-index:2}
+.dpgf-row{display:grid;grid-template-columns:60px 1fr 45px 55px 110px 95px 80px 60px 70px;
+          gap:4px;padding:5px 6px;border-bottom:1px solid var(--bord);font-size:11px;
+          align-items:center;background:#fff}
+.dpgf-row.ok{background:#e8f7ec}
+.dpgf-row input,.dpgf-row select{padding:3px 5px;font-size:11px}
+.dpgf-row .mini-input{font-family:'Consolas',monospace;font-size:10px}
+.dpgf-mode-toggle{display:inline-flex;background:#eef2f7;border-radius:3px;overflow:hidden;font-size:9px}
+.dpgf-mode-toggle button{border:none;background:transparent;padding:2px 6px;cursor:pointer;
+                         font-weight:700;color:#555}
+.dpgf-mode-toggle button.on{background:var(--bleu2);color:#fff}
+
+/* ── Saisie masse (grille éditable) ── */
+.masse-hdr{display:grid;grid-template-columns:34px 110px 180px 1fr 70px 100px 110px 1fr 60px;
+           gap:4px;padding:6px;background:var(--bleu);color:#fff;font-size:10px;font-weight:700;
+           border-radius:4px 4px 0 0;align-items:center;position:sticky;top:0;z-index:2}
+.masse-row{display:grid;grid-template-columns:34px 110px 180px 1fr 70px 100px 110px 1fr 60px;
+           gap:4px;padding:4px 6px;border-bottom:1px solid var(--bord);align-items:center;background:#fff}
+.masse-row.valid{background:#e8f7ec}
+.masse-row.error{background:#fdecea}
+.masse-row input,.masse-row select{padding:4px 6px;font-size:11px}
+.masse-row .row-num{font-size:10px;color:#888;text-align:center;font-weight:700}
+.masse-row .row-action{display:flex;gap:2px;justify-content:center}
+
+/* ── Misc ── */
+.hidden{display:none!important}
+.lot-dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex-shrink:0}
+.help-text{font-size:10px;color:#888;margin-top:4px;font-style:italic}
+.kbd{display:inline-block;padding:1px 5px;border:1px solid #bbb;border-radius:3px;
+     background:#f5f5f5;font-family:'Consolas',monospace;font-size:10px;color:#444}
+
+/* Color picker pour les paramètres */
+.color-preset{height:30px;border-radius:4px;cursor:pointer;border:2px solid transparent;
+              transition:transform .1s}
+.color-preset:hover{transform:scale(1.1)}
+.color-preset.sel{border-color:#000;box-shadow:0 0 0 2px #fff inset}
+.theme-swatch{width:38px;height:38px;border-radius:8px;cursor:pointer;border:2px solid transparent;
+              position:relative;transition:transform .1s}
+.theme-swatch:hover{transform:scale(1.07)}
+.theme-swatch.sel::after{content:"✓";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+                          color:#fff;font-size:18px;font-weight:900;text-shadow:0 1px 2px rgba(0,0,0,.5)}
+.lot-color-row{display:flex;align-items:center;gap:8px;padding:5px 8px;
+               border:1px solid var(--bord);border-radius:4px;background:#fff;font-size:11px}
+.lot-color-row .swatch{width:20px;height:20px;border-radius:4px;cursor:pointer;flex-shrink:0;
+                       border:1px solid rgba(0,0,0,.15)}
+.lot-color-row .lname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* Historique prix dans le picker */
+.histo-item{display:grid;grid-template-columns:80px 1fr 90px 90px;gap:6px;padding:6px 8px;
+            cursor:pointer;border-bottom:1px solid var(--bord);font-size:11px;
+            font-family:'Consolas',monospace}
+.histo-item:hover{background:#edf3fc}
+.histo-item.sel{background:var(--bleu);color:#fff}
+.histo-item .right{text-align:right;font-weight:700}
+
+/* Toast */
+#toast{position:fixed;bottom:20px;right:20px;background:#222;color:#fff;padding:10px 16px;
+       border-radius:6px;font-size:12px;font-weight:600;z-index:200;opacity:0;
+       transform:translateY(10px);transition:all .25s;pointer-events:none}
+#toast.show{opacity:1;transform:translateY(0)}
+#toast.vert{background:#1e8449}
+#toast.rouge{background:#a93226}
+#toast.bleu{background:#1f618d}
+#toast.orange{background:#b9770e}
+
+/* Dropdown menu (kebab style Google — overlay flottant) */
+.kebab-btn{background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.25);
+           border-radius:4px;width:28px;height:26px;cursor:pointer;font-size:14px;font-weight:700;
+           padding:0;display:inline-flex;align-items:center;justify-content:center;line-height:1}
+.kebab-btn:hover{background:rgba(255,255,255,.28)}
+.dd-menu{position:fixed;background:#fff;color:#333;min-width:240px;
+         box-shadow:0 6px 20px rgba(0,0,0,.22);border-radius:6px;z-index:200;
+         overflow:hidden;border:1px solid #d4d8dd;padding:4px 0;
+         opacity:0;transform:translateY(-4px);pointer-events:none;transition:opacity .12s, transform .12s}
+.dd-menu.open{opacity:1;transform:translateY(0);pointer-events:auto}
+.dd-item{padding:8px 14px;cursor:pointer;font-size:12px;
+         display:flex;align-items:center;gap:10px;color:#2c3e50;font-weight:500}
+.dd-item:hover{background:#f0f4f8}
+.dd-item.danger{color:#a93226}
+.dd-item.danger:hover{background:#fdecea}
+.dd-item.success{color:#1e8449}
+.dd-item.success:hover{background:#e8f7ec}
+.dd-item .ico{font-size:14px;width:18px;text-align:center;flex-shrink:0}
+.dd-sep{height:1px;background:#e6e9ed;margin:4px 0}
+</style>
+</head>
+<body>
+
+<!-- ════════════════ NAV ════════════════ -->
+<nav>
+  <span class="nav-title">
+    <svg class="logo-svg" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+      <!-- Fond cercle dégradé bleu-violet -->
+      <defs>
+        <linearGradient id="lgrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#5fa8d3"/>
+          <stop offset="100%" stop-color="#1e3a5f"/>
+        </linearGradient>
+      </defs>
+      <rect x="2" y="2" width="36" height="36" rx="9" fill="url(#lgrad)" stroke="#fff" stroke-width="0.8"/>
+      <!-- Building stylisé : 3 tours -->
+      <rect x="9"  y="14" width="6" height="18" fill="#fff" opacity="0.92"/>
+      <rect x="17" y="9"  width="6" height="23" fill="#fff" opacity="0.92"/>
+      <rect x="25" y="17" width="6" height="15" fill="#fff" opacity="0.92"/>
+      <!-- fenêtres tour gauche -->
+      <rect x="10.5" y="16" width="1.5" height="1.5" fill="#1e3a5f"/>
+      <rect x="13"   y="16" width="1.5" height="1.5" fill="#1e3a5f"/>
+      <rect x="10.5" y="20" width="1.5" height="1.5" fill="#1e3a5f"/>
+      <rect x="13"   y="20" width="1.5" height="1.5" fill="#1e3a5f"/>
+      <rect x="10.5" y="24" width="1.5" height="1.5" fill="#1e3a5f"/>
+      <rect x="13"   y="24" width="1.5" height="1.5" fill="#1e3a5f"/>
+      <!-- fenêtres tour centrale -->
+      <rect x="18.5" y="11" width="1.5" height="1.5" fill="#1e3a5f"/>
+      <rect x="21"   y="11" width="1.5" height="1.5" fill="#1e3a5f"/>
+      <rect x="18.5" y="15" width="1.5" height="1.5" fill="#1e3a5f"/>
+      <rect x="21"   y="15" width="1.5" height="1.5" fill="#1e3a5f"/>
+      <rect x="18.5" y="19" width="1.5" height="1.5" fill="#1e3a5f"/>
+      <rect x="21"   y="19" width="1.5" height="1.5" fill="#1e3a5f"/>
+      <rect x="18.5" y="23" width="1.5" height="1.5" fill="#1e3a5f"/>
+      <rect x="21"   y="23" width="1.5" height="1.5" fill="#1e3a5f"/>
+      <!-- fenêtres tour droite -->
+      <rect x="26.5" y="19" width="1.5" height="1.5" fill="#1e3a5f"/>
+      <rect x="29"   y="19" width="1.5" height="1.5" fill="#1e3a5f"/>
+      <rect x="26.5" y="23" width="1.5" height="1.5" fill="#1e3a5f"/>
+      <rect x="29"   y="23" width="1.5" height="1.5" fill="#1e3a5f"/>
+      <!-- Symbole € en pastille -->
+      <circle cx="30.5" cy="11" r="5.5" fill="#f4d03f" stroke="#fff" stroke-width="0.8"/>
+      <text x="30.5" y="14" font-size="7.5" fill="#1e3a5f" text-anchor="middle"
+            font-weight="900" font-family="Arial,sans-serif">€</text>
+    </svg>
+    <span class="logo-txt">Base de Prix</span>
+  </span>
+  <button class="nav-btn active" data-page="accueil">Accueil</button>
+  <button class="nav-btn" data-page="base">Base de Prix</button>
+  <button class="nav-btn" data-page="dpgf">DPGF</button>
+  <button class="nav-btn" data-page="masse">Saisie masse</button>
+  <button class="nav-btn" data-page="ratios">Ratios</button>
+
+  <div class="nav-actions">
+    <button class="btn btn-gris" id="btnLinkMain" style="font-size:10px">🔗 Lier fichier Excel</button>
+    <button class="kebab-btn" id="btnKebab" title="Plus d'options">⋮</button>
+    <button class="btn btn-orange" id="btnExportStandalone" style="font-size:10px"
+            title="Exporter un fichier Excel formaté (utile sans liaison)">⬇ Export</button>
+  </div>
+</nav>
+
+<!-- Menu kebab — overlay flottant, hors du flux DOM de la nav (pas tronqué) -->
+<div class="dd-menu" id="ddMenu">
+  <div class="dd-item" id="ddOpenFile"><span class="ico">📂</span>Ouvrir le fichier</div>
+  <div class="dd-item" id="ddShowFile"><span class="ico">📁</span>Afficher dans le dossier</div>
+  <div class="dd-item" id="ddRelink"><span class="ico">🔗</span>Changer de fichier lié</div>
+  <div class="dd-sep"></div>
+  <div class="dd-item success" id="ddSync"><span class="ico">🔄</span>Forcer la synchronisation</div>
+  <div class="dd-item" id="ddExport"><span class="ico">⬇</span>Export Excel autonome</div>
+  <div class="dd-sep"></div>
+  <div class="dd-item danger" id="ddUnlink"><span class="ico">⛓️‍💥</span>Délier le fichier</div>
+</div>
+
+<!-- ════════════════ BANDEAU LIAISON ════════════════ -->
+<div class="link-bar unlinked" id="linkBar">
+  <span class="lb-status" id="lbStatus">⛓️‍💥 Aucun fichier lié</span>
+  <span class="lb-path" id="lbPath">Cliquez sur « Lier fichier Excel » pour synchroniser vos prix avec un fichier Excel existant.</span>
+  <span id="lbExtra"></span>
+</div>
+
+<div class="app">
+
+<!-- ════════════════ SIDEBAR ════════════════ -->
+<div class="sidebar">
+  <div class="sb-sep">Navigation</div>
+  <div class="sb-item active" data-page="accueil">🏠 Accueil</div>
+  <div class="sb-item" data-page="base">📦 Tous les prix <span class="sb-count" id="sbCntBase"></span></div>
+  <div class="sb-item" data-page="dpgf">📥 DPGF Import <span class="sb-count" id="sbCntDpgf"></span></div>
+  <div class="sb-item" data-page="masse">📋 Saisie masse</div>
+  <div class="sb-item" data-page="ratios">📊 Ratios</div>
+  <div class="sb-sep">Lots</div>
+  <div id="sbLots"></div>
+  <div class="sb-sep" style="margin-top:8px">Outils</div>
+  <div class="sb-item" data-page="params">⚙️ Paramètres</div>
+</div>
+
+<!-- ════════════════ MAIN ════════════════ -->
+<div class="main">
+
+<!-- ─── Accueil ─── -->
+<div id="page-accueil" class="page active">
+  <!-- Bandeau de prise en main : visible UNIQUEMENT si pas de fichier lié -->
+  <div class="card" id="welcomeCard" style="background:linear-gradient(135deg,#dbeeff,#fff)">
+    <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+      <svg width="56" height="56" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0">
+        <defs><linearGradient id="lgwc" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#5fa8d3"/><stop offset="100%" stop-color="#1e3a5f"/></linearGradient></defs>
+        <rect x="2" y="2" width="36" height="36" rx="9" fill="url(#lgwc)"/>
+        <rect x="9" y="14" width="6" height="18" fill="#fff" opacity="0.92"/>
+        <rect x="17" y="9" width="6" height="23" fill="#fff" opacity="0.92"/>
+        <rect x="25" y="17" width="6" height="15" fill="#fff" opacity="0.92"/>
+        <circle cx="30.5" cy="11" r="5.5" fill="#f4d03f"/>
+        <text x="30.5" y="14" font-size="7.5" fill="#1e3a5f" text-anchor="middle" font-weight="900">€</text>
+      </svg>
+      <div style="flex:1;min-width:240px">
+        <div style="font-size:16px;font-weight:700;color:var(--bleu);margin-bottom:4px">
+          Bienvenue dans Base de Prix
+        </div>
+        <div style="font-size:11px;color:#555;margin-bottom:10px">
+          Pour démarrer, soit vous <strong>liez un fichier Excel existant</strong>,
+          soit vous <strong>générez un nouveau classeur</strong> tout prêt avec menu, lots et hyperliens.
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-vert" onclick="openModalGen()">📄 Générer une nouvelle feuille de base</button>
+          <button class="btn btn-bleu" onclick="linkExcel()">🔗 Lier un fichier Excel existant</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="stats-grid" id="statsGrid"></div>
+  <div class="card">
+    <div class="card-title">⚡ Actions rapides</div>
+    <div class="btn-row">
+      <button class="btn btn-vert" onclick="openAjout()">+ Ajouter un prix</button>
+      <button class="btn btn-bleu" onclick="showPage('dpgf')">📥 Importer DPGF</button>
+      <button class="btn btn-violet" onclick="showPage('masse')">📋 Saisie masse</button>
+      <button class="btn btn-orange" onclick="showPage('ratios')">📊 Voir ratios</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">📦 Derniers prix ajoutés</div>
+    <div class="tbl-wrap"><table id="tblRecents"></table></div>
+  </div>
+</div>
+
+<!-- ─── Base ─── -->
+<div id="page-base" class="page">
+  <div class="card">
+    <div class="card-title">
+      <span id="baseTitle">📦 Base de Prix</span>
+      <span id="baseCount" style="font-weight:400;color:#888;font-size:11px"></span>
+    </div>
+    <div class="srch-row">
+      <input type="text" id="searchBase" placeholder="🔍 Rechercher (repère, désignation, projet...)" oninput="renderBase()">
+      <select id="filterLot" onchange="renderBase()"><option value="">Tous les lots</option></select>
+      <button class="btn btn-vert" onclick="openAjout()">+ Ajouter un prix</button>
+    </div>
+    <div class="tbl-wrap"><table id="tblBase"></table></div>
+  </div>
+</div>
+
+<!-- ─── DPGF ─── -->
+<div id="page-dpgf" class="page">
+  <div class="card">
+    <div class="card-title">📥 Import DPGF</div>
+    <div class="info info-bleu">
+      Chargez votre DPGF Excel. L'application <strong>détecte automatiquement les feuilles
+      contenant des colonnes Repère / Descriptif / Unité / Quantité</strong>. Si plusieurs
+      feuilles compatibles sont détectées, vous pourrez choisir lesquelles importer.
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-bleu" id="fileDPGFBtn">📂 Charger DPGF (.xlsx, .xlsm)</button>
+      <button class="btn btn-violet" onclick="associerTout()">🔗 Associer toutes les lignes</button>
+      <button class="btn btn-vert" onclick="exportDPGF()">⬇ Exporter DPGF complétée</button>
+      <button class="btn btn-rouge" onclick="clearDPGF()">🗑 Vider</button>
+    </div>
+  </div>
+
+  <div class="card hidden" id="dpgfCard">
+    <div class="card-title">
+      <span>Lignes DPGF <span id="dpgfStats"></span></span>
+      <span style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:10px;color:#888;font-weight:400">Affichage :</span>
+        <div class="dpgf-mode-toggle" id="viewToggle">
+          <button class="on" data-view="sections">📑 Par feuille</button>
+          <button data-view="continue">📜 Liste continue</button>
+        </div>
+      </span>
+    </div>
+    <div class="info info-orange" style="margin-bottom:10px">
+      💡 <strong>Astuce :</strong> Pour chaque ligne vous pouvez taper un prix directement,
+      basculer entre <span class="kbd">Exact</span> / <span class="kbd">Ratio</span>,
+      ou cliquer sur <span class="kbd">Choisir</span> pour piocher dans la base.
+    </div>
+    <div id="dpgfRows"></div>
+  </div>
+</div>
+
+<!-- ─── Saisie masse (grille éditable) ─── -->
+<div id="page-masse" class="page">
+  <div class="card">
+    <div class="card-title">📋 Saisie masse — Ajout de plusieurs prix d'un coup</div>
+    <div class="info info-bleu">
+      Saisissez vos prix directement dans le tableau ci-dessous, ligne par ligne.
+      Vous pouvez aussi <strong>coller depuis Excel/Calc</strong> :
+      copiez vos cellules (<span class="kbd">Ctrl+C</span>), cliquez sur le bouton
+      <strong>Coller depuis Excel</strong> et collez (<span class="kbd">Ctrl+V</span>).
+      L'ordre des colonnes doit être&nbsp;: Repère, Lot, Désignation, Unité, Prix HT, Date, Projet.
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-bleu" onclick="addMasseRow(1)">+ 1 ligne</button>
+      <button class="btn btn-bleu" onclick="addMasseRow(10)">+ 10 lignes</button>
+      <button class="btn btn-violet" onclick="openMassePaste()">📋 Coller depuis Excel</button>
+      <button class="btn btn-orange" onclick="appliquerProjet()">🏷 Appliquer projet/date à tout</button>
+      <button class="btn btn-rouge" onclick="clearMasse()">🗑 Vider</button>
+      <span style="flex:1"></span>
+      <button class="btn btn-vert" onclick="validerMasse()">
+        ✅ Importer dans la base
+      </button>
+    </div>
+    <div class="btn-row" style="margin-top:8px;border-top:1px dashed #ccc;padding-top:10px">
+      <span style="font-size:11px;color:#555;font-weight:600;align-self:center;margin-right:4px">
+        🗂️ Trame Excel :
+      </span>
+      <button class="btn btn-bleu" style="background:#4a6fa5" onclick="genererTrameMasse()">
+        📥 Télécharger trame vide
+      </button>
+      <button class="btn btn-bleu" style="background:#4a6fa5" onclick="importerTrameMasse()">
+        📤 Importer trame remplie
+      </button>
+      <span class="help-text" style="align-self:center;margin:0">
+        Génère un fichier Excel formaté à remplir hors-ligne, puis ré-importez-le ici.
+      </span>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">
+      <span>Aperçu <span id="masseCount"></span></span>
+      <span id="masseValidStats" style="font-size:10px;font-weight:400;color:#888"></span>
+    </div>
+    <div class="tbl-wrap" style="min-width:1100px">
+      <div class="masse-hdr">
+        <span>#</span><span>Repère*</span><span>Lot*</span><span>Désignation*</span>
+        <span>Unité</span><span>Prix HT*</span><span>Date</span><span>Projet</span><span></span>
+      </div>
+      <div id="masseRows"></div>
+    </div>
+    <div class="help-text" style="margin-top:8px">
+      💡 Les lignes vertes sont valides et seront importées. Les lignes en rouge ont des
+      champs obligatoires manquants et seront ignorées.
+    </div>
+  </div>
+</div>
+
+<!-- ─── Ratios ─── -->
+<div id="page-ratios" class="page">
+  <div class="card">
+    <div class="card-title">📊 Ratios par repère interne</div>
+    <div class="info info-bleu">
+      Pour chaque repère interne, l'application calcule la moyenne (ratio), le min, max
+      et le dernier prix observé. Cliquez sur un repère pour voir le détail.
+    </div>
+    <div class="srch-row">
+      <input type="text" id="searchRatio" placeholder="🔍 Filtrer par repère ou désignation..." oninput="renderRatios()">
+      <select id="filterRatioLot" onchange="renderRatios()"><option value="">Tous les lots</option></select>
+    </div>
+    <div class="tbl-wrap"><table id="tblRatios"></table></div>
+  </div>
+</div>
+
+<!-- ─── Paramètres ─── -->
+<div id="page-params" class="page">
+  <div class="card">
+    <div class="card-title">⚙️ Paramètres</div>
+    <div class="info info-bleu">
+      Ces paramètres sont stockés localement sur cet ordinateur.
+    </div>
+
+    <div style="margin-top:12px">
+      <label style="font-size:12px;font-weight:700;display:block;margin-bottom:6px">
+        🎨 Couleur principale de l'application
+      </label>
+      <div id="themeChooser" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+    </div>
+
+    <div style="margin-top:18px">
+      <label style="font-size:12px;font-weight:700;display:block;margin-bottom:6px">
+        🏗️ Couleurs des 14 lots
+      </label>
+      <div class="help-text" style="margin-bottom:8px">
+        Cliquez sur la pastille pour personnaliser la couleur d'un lot.
+      </div>
+      <div id="lotColorList" style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px"></div>
+      <button class="btn btn-orange" style="margin-top:10px;font-size:10px"
+              onclick="resetLotColors()">↩ Réinitialiser les couleurs par défaut</button>
+    </div>
+
+    <div style="margin-top:18px;border-top:1px solid var(--bord);padding-top:14px">
+      <label style="font-size:12px;font-weight:700;display:block;margin-bottom:6px">
+        🏢 Identité (utilisée pour la génération de fichiers Excel)
+      </label>
+      <div class="form-grid">
+        <div>
+          <label>Nom de l'entreprise</label>
+          <input type="text" id="prefEntreprise" placeholder="ex : Entreprise A"
+                 onchange="savePrefs()">
+        </div>
+        <div>
+          <label>Sous-titre / Localisation</label>
+          <input type="text" id="prefSousTitre" placeholder="ex : Ville — Pays"
+                 onchange="savePrefs()">
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:18px;border-top:1px solid var(--bord);padding-top:14px">
+      <label style="font-size:12px;font-weight:700;display:block;margin-bottom:6px">
+        🛠️ Maintenance
+      </label>
+      <div class="btn-row">
+        <button class="btn btn-orange" onclick="exportBackup()">💾 Sauvegarder (JSON)</button>
+        <button class="btn btn-bleu"   onclick="importBackup()">📤 Restaurer sauvegarde</button>
+        <button class="btn btn-rouge"  onclick="resetAll()">🗑️ Tout effacer</button>
+      </div>
+    </div>
+
+    <!-- Signature discrète -->
+    <div style="margin-top:24px;padding-top:12px;border-top:1px dashed var(--bord);
+                text-align:center;font-size:10px;color:#999;font-style:italic;
+                line-height:1.6">
+      Base de Prix &nbsp;•&nbsp; Version 2.2<br>
+      Créé par <strong style="color:#666;font-style:normal">Nathan RAMEDACE</strong>
+      &nbsp;•&nbsp; Mis à jour le <span id="appBuildDate">27 avril 2026</span>
+    </div>
+  </div>
+</div>
+
+</div>
+</div>
+
+<!-- ════════════════ MODALS ════════════════ -->
+
+<!-- Modal : Ajouter / Éditer un prix -->
+<div class="modal-bg" id="modalAjout" data-modal="ajout">
+  <div class="modal">
+    <div class="modal-title" id="ajTitle">+ Ajouter un prix</div>
+    <div class="form-grid">
+      <div>
+        <label>Repère existant</label>
+        <select id="ajRepExist" onchange="onRepChange()"><option value="">— Nouveau repère —</option></select>
+      </div>
+      <div>
+        <label>ou créer nouveau repère</label>
+        <input type="text" id="ajRepNv" placeholder="ex : PV-001" oninput="onNvRep()">
+      </div>
+    </div>
+    <div class="info info-vert" id="ajRatioInfo" style="display:none"></div>
+    <div class="form-grid" style="margin-top:8px">
+      <div><label>Lot *</label><select id="ajLot"></select></div>
+      <div><label>Désignation *</label><input type="text" id="ajDesg" placeholder="ex : Pare vapeur sur bac acier"></div>
+      <div>
+        <label>Unité</label>
+        <select id="ajUnite">
+          <option>m2</option><option>ml</option><option>m3</option><option>u</option>
+          <option>ens</option><option>kg</option><option>h</option><option>forfait</option>
+        </select>
+      </div>
+      <div><label>Prix HT (€) *</label><input type="number" id="ajPrix" step="0.01"></div>
+      <div><label>Date</label><input type="date" id="ajDate"></div>
+      <div><label>Projet</label><input type="text" id="ajProjet" placeholder="ex : Résidence Les Pins"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-gris" onclick="closeModal('modalAjout')">Annuler</button>
+      <button class="btn btn-vert" onclick="enregistrer()">✅ Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal : Sélectionner un repère pour la DPGF -->
+<div class="modal-bg" id="modalSel" data-modal="sel">
+  <div class="modal" style="max-width:820px">
+    <div class="modal-title" id="selTitle">Choisir un repère</div>
+    <div class="info info-bleu" id="selDPGF"></div>
+    <div class="srch-row" style="margin-top:8px">
+      <select id="selLot" onchange="filtrerRep()"><option value="">Tous les lots</option></select>
+      <input type="text" id="selSearch" placeholder="🔍 Rechercher..." oninput="filtrerRep()">
+    </div>
+    <div class="rep-hdr"><span>Repère</span><span>Désignation</span><span>Unité</span><span>Prix HT (€)</span></div>
+    <div class="rep-list" id="repList"></div>
+    <div style="font-size:10px;color:#888;margin:3px 0" id="repNb"></div>
+
+    <div style="display:flex;gap:14px;align-items:center;margin:8px 0;flex-wrap:wrap">
+      <strong style="font-size:11px">Mode :</strong>
+      <label style="display:flex;align-items:center;gap:4px;font-size:11px;font-weight:400">
+        <input type="radio" name="modeR" value="exact-last" checked> Dernier prix
+      </label>
+      <label style="display:flex;align-items:center;gap:4px;font-size:11px;font-weight:400">
+        <input type="radio" name="modeR" value="exact-pick"> Choisir un prix précis
+      </label>
+      <label style="display:flex;align-items:center;gap:4px;font-size:11px;font-weight:400">
+        <input type="radio" name="modeR" value="ratio"> Ratio (moyenne)
+      </label>
+    </div>
+
+    <!-- Liste des prix historiques (mode "Choisir un prix précis") -->
+    <div id="histoZone" class="hidden" style="border:1px solid var(--bord);border-radius:5px;
+         max-height:160px;overflow-y:auto;margin-bottom:8px">
+      <div style="display:grid;grid-template-columns:80px 1fr 90px 90px;gap:6px;padding:5px 8px;
+                  background:#34495e;color:#fff;font-size:10px;font-weight:700">
+        <span>Date</span><span>Projet</span><span>Désignation</span><span style="text-align:right">Prix HT</span>
+      </div>
+      <div id="histoList"></div>
+    </div>
+
+    <div class="info info-vert" id="selApercu">Sélectionnez un repère...</div>
+    <div class="modal-foot">
+      <button class="btn btn-gris" onclick="ignorer()">Ignorer cette ligne</button>
+      <button class="btn btn-vert" onclick="validerRep()">✅ Valider</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal : Sélection des feuilles DPGF (multi-feuilles) -->
+<div class="modal-bg" id="modalSheets" data-modal="sheets">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-title">📑 Plusieurs feuilles compatibles détectées</div>
+    <div class="info info-bleu" style="font-size:11px">
+      Cochez les feuilles à importer. Le repère DPGF n'est pas obligatoire — seule la
+      colonne descriptif/désignation est nécessaire.
+    </div>
+    <div id="sheetsList" style="max-height:340px;overflow-y:auto;border:1px solid var(--bord);
+                               border-radius:5px;padding:6px;margin-top:6px"></div>
+    <div class="modal-foot">
+      <button class="btn btn-gris" style="font-size:10px;padding:5px 10px"
+              onclick="closeModal('modalSheets')">Annuler</button>
+      <button class="btn btn-bleu" style="font-size:10px;padding:5px 10px"
+              onclick="toggleAllSheets()">↔ Tout (dé)cocher</button>
+      <button class="btn btn-vert" style="font-size:10px;padding:5px 10px"
+              onclick="confirmSheets()">✅ Importer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal : Génération d'une nouvelle feuille de base de prix -->
+<div class="modal-bg" id="modalGen" data-modal="gen">
+  <div class="modal">
+    <div class="modal-title">📄 Générer une nouvelle feuille de base de prix</div>
+    <div class="info info-bleu">
+      Cette fonction crée un fichier <strong>.xlsx</strong> tout neuf avec : feuille
+      <strong>MENU</strong> (boutons hyperliens), feuille <strong>BASE_PRIX</strong>,
+      et 14 feuilles par lot. Tout est mis en forme et prêt à recevoir vos prix.
+    </div>
+    <div class="form-grid">
+      <div>
+        <label>Nom de l'entreprise</label>
+        <input type="text" id="genEntreprise" placeholder="ex : Entreprise 1">
+      </div>
+      <div>
+        <label>Sous-titre / Localisation</label>
+        <input type="text" id="genSousTitre" placeholder="ex : Ville - Pays">
+      </div>
+    </div>
+    <div style="margin-top:8px">
+      <label>
+        <input type="checkbox" id="genLierApres" checked>
+        Lier directement ce fichier à l'application après génération (recommandé)
+      </label>
+    </div>
+    <div class="info info-orange" style="margin-top:8px;font-size:10px">
+      💡 Le bouton <strong>« Lier directement »</strong> évite d'avoir à refaire
+      l'opération « 🔗 Lier fichier Excel » manuellement. Le fichier deviendra
+      la source de référence et toute modification dans l'app sera automatiquement
+      synchronisée vers ce fichier.
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-gris" onclick="closeModal('modalGen')">Annuler</button>
+      <button class="btn btn-vert" onclick="confirmGenererTemplate()">📄 Générer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal : Choisir une couleur pour un lot -->
+<div class="modal-bg" id="modalLotColor" data-modal="lotcolor">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-title" id="lcTitle">Couleur du lot</div>
+    <input type="color" id="lcPicker" style="width:100%;height:60px;cursor:pointer">
+    <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:4px;margin-top:10px">
+      <span class="color-preset" data-c="#e74c3c"></span>
+      <span class="color-preset" data-c="#e67e22"></span>
+      <span class="color-preset" data-c="#f39c12"></span>
+      <span class="color-preset" data-c="#f1c40f"></span>
+      <span class="color-preset" data-c="#27ae60"></span>
+      <span class="color-preset" data-c="#16a085"></span>
+      <span class="color-preset" data-c="#1abc9c"></span>
+      <span class="color-preset" data-c="#3498db"></span>
+      <span class="color-preset" data-c="#2980b9"></span>
+      <span class="color-preset" data-c="#9b59b6"></span>
+      <span class="color-preset" data-c="#8e44ad"></span>
+      <span class="color-preset" data-c="#d35400"></span>
+      <span class="color-preset" data-c="#7f8c8d"></span>
+      <span class="color-preset" data-c="#34495e"></span>
+      <span class="color-preset" data-c="#c0392b"></span>
+      <span class="color-preset" data-c="#95a5a6"></span>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-gris" onclick="closeModal('modalLotColor')">Annuler</button>
+      <button class="btn btn-vert" onclick="confirmLotColor()">✅ Appliquer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal : Coller depuis Excel -->
+<div class="modal-bg" id="modalPaste" data-modal="paste">
+  <div class="modal" style="max-width:740px">
+    <div class="modal-title">📋 Coller depuis Excel</div>
+    <div class="info info-bleu">
+      Collez ici les cellules copiées depuis Excel/Calc (<span class="kbd">Ctrl+V</span>).
+      Colonnes attendues : <strong>Repère, Lot, Désignation, Unité, Prix HT, Date, Projet</strong>
+      (les 4 premières sont obligatoires, le reste est optionnel).
+    </div>
+    <textarea id="pasteZone" rows="10" placeholder="Collez ici..." style="font-family:'Consolas',monospace;font-size:11px"></textarea>
+    <div class="modal-foot">
+      <button class="btn btn-gris" onclick="closeModal('modalPaste')">Annuler</button>
+      <button class="btn btn-vert" onclick="processPaste()">✅ Ajouter au tableau</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal : Appliquer projet/date à toutes les lignes valides -->
+<div class="modal-bg" id="modalApply" data-modal="apply">
+  <div class="modal">
+    <div class="modal-title">🏷 Appliquer projet & date à tout</div>
+    <div class="info info-bleu">
+      Pour les lignes du tableau qui ont un Projet/Date vide, appliquer ces valeurs.
+    </div>
+    <div class="form-grid">
+      <div><label>Projet</label><input type="text" id="applyProjet" placeholder="ex : Résidence Les Pins"></div>
+      <div><label>Date</label><input type="date" id="applyDate"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-gris" onclick="closeModal('modalApply')">Annuler</button>
+      <button class="btn btn-vert" onclick="confirmApplyProjet()">✅ Appliquer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast notification -->
+<div id="toast"></div>
+
+<script>
+/* ============================================================
+   CONSTANTES & ÉTAT GLOBAL
+   ============================================================ */
+const LOTS = [
+  '01 - Amiante','02 - Demolition-Curage','03 - Etancheite','04 - Gros Oeuvre',
+  '05 - Amenagement Ext.','06 - Facade','07 - Menuiseries Ext.','08 - Menuiseries Int.',
+  '09 - Serrurerie','10 - Revetement Sol','11 - Cloison-Doublage','12 - Revetements',
+  '13 - Ascenseur','14 - Mobilier'
+];
+const COLORS = ['#e74c3c','#e67e22','#27ae60','#2980b9','#95a5a6','#f39c12',
+  '#1abc9c','#3498db','#f1c40f','#9b59b6','#e67e22','#16a085','#d35400','#8e44ad'];
+
+// État
+let BASE   = JSON.parse(localStorage.getItem('bp')||'[]');
+let DPGF   = [];
+let MASSE  = [];
+let gIdx   = -1;
+let gSel   = {};
+let gSelHisto = null;          // prix précis sélectionné dans l'historique
+let gCb    = null;
+let dpgfView = 'sections';   // 'sections' | 'continue'
+let detectedSheets = [];      // pour modal sélection feuilles
+let pendingDPGFwb = null;
+let isElectron = !!window.electronAPI;
+let editingLotIdx = -1;        // index du lot en cours d'édition de couleur
+
+// Préférences (localStorage)
+const DEFAULT_LOT_COLORS = ['#e74c3c','#e67e22','#27ae60','#2980b9','#95a5a6','#f39c12',
+  '#1abc9c','#3498db','#f1c40f','#9b59b6','#e67e22','#16a085','#d35400','#8e44ad'];
+let PREFS = JSON.parse(localStorage.getItem('bp_prefs') || '{}');
+PREFS.theme       = PREFS.theme       || '#1e3a5f';
+PREFS.lotColors   = PREFS.lotColors   || [...DEFAULT_LOT_COLORS];
+PREFS.entreprise  = PREFS.entreprise  || '';
+PREFS.sousTitre   = PREFS.sousTitre   || '';
+
+// Liaison Excel
+let linkedExcelPath = localStorage.getItem('linkedExcelPath') || null;
+let linkedExcelExt  = (linkedExcelPath || '').toLowerCase().endsWith('.xlsm') ? 'xlsm' : 'xlsx';
+let syncInProgress  = false;
+let syncDebounce    = null;
+
+/* ============================================================
+   UTILITAIRES
+   ============================================================ */
+function save(){ localStorage.setItem('bp', JSON.stringify(BASE)); scheduleSync(); }
+function $ (id){ return document.getElementById(id); }
+function esc(s){ return String(s||'').replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtPrix(p){ return (p||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €'; }
+function lotIdx(l){ return LOTS.indexOf(l); }
+function lotColor(l){
+  const i = lotIdx(l);
+  if (i < 0) return '#95a5a6';
+  return (PREFS.lotColors && PREFS.lotColors[i]) || COLORS[i];
+}
+function lotShort(l){ return l ? l.split(' - ')[0] : '—'; }
+function fmtQte(q){ return (parseFloat(q)||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+function toast(msg, type='vert', dur=2800){
+  const t = $('toast');
+  t.textContent = msg;
+  t.className = type;
+  requestAnimationFrame(()=> t.classList.add('show'));
+  clearTimeout(t._tm);
+  t._tm = setTimeout(()=> t.classList.remove('show'), dur);
+}
+
+/* ============================================================
+   MODALS — Focus management (CORRECTION DU BUG CLAVIER)
+   ============================================================ */
+function openModal(id, focusId){
+  const m = $(id);
+  if (!m) return;
+  m.classList.add('open');
+  // Forcer le focus sur la fenêtre puis sur le premier input
+  // (résout le bug Electron où le focus reste sur le bouton qui a ouvert le modal)
+  setTimeout(()=>{
+    try { window.focus(); } catch(e){}
+    const el = focusId ? $(focusId) : m.querySelector('input,select,textarea,button');
+    if (el) {
+      el.focus();
+      if (el.select) try { el.select(); } catch(e){}
+    }
+  }, 60);
+}
+function closeModal(id){ const m = $(id); if (m) m.classList.remove('open'); }
+
+// Fermeture par Escape + click outside
+document.addEventListener('keydown', e=>{
+  if (e.key === 'Escape'){
+    document.querySelectorAll('.modal-bg.open').forEach(m=> m.classList.remove('open'));
+  }
+});
+document.querySelectorAll('.modal-bg').forEach(m => {
+  m.addEventListener('mousedown', e => { if (e.target === m) m.classList.remove('open'); });
+});
+
+/* ============================================================
+   NAVIGATION
+   ============================================================ */
+function showPage(p){
+  document.querySelectorAll('.page').forEach(el=> el.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b=> b.classList.remove('active'));
+  document.querySelectorAll('.sb-item').forEach(b=> b.classList.remove('active'));
+  $('page-'+p).classList.add('active');
+  document.querySelectorAll(`.nav-btn[data-page="${p}"], .sb-item[data-page="${p}"]`)
+    .forEach(b=> b.classList.add('active'));
+  if (p==='accueil') renderAccueil();
+  if (p==='base')    renderBase();
+  if (p==='ratios')  renderRatios();
+  if (p==='masse')   { if (!MASSE.length) addMasseRow(5); renderMasse(); }
+  if (p==='dpgf')    renderDPGF();
+  if (p==='params')  renderParams();
+}
+function showLot(lot){
+  showPage('base');
+  $('filterLot').value = lot;
+  $('baseTitle').textContent = '📦 ' + lot;
+  renderBase();
+}
+
+document.querySelectorAll('.nav-btn[data-page], .sb-item[data-page]').forEach(b=>{
+  b.addEventListener('click', ()=> showPage(b.dataset.page));
+});
+
+/* ============================================================
+   INIT UI
+   ============================================================ */
+function initUI(){
+  // sidebar lots
+  $('sbLots').innerHTML = LOTS.map((l,i)=>{
+    const cnt = BASE.filter(r=> r.lot===l).length;
+    return `<div class="sb-item" onclick="showLot('${l}')">
+      <span class="lot-dot" style="background:${COLORS[i]}"></span>
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(l)}</span>
+      ${cnt ? `<span class="sb-count">${cnt}</span>` : ''}
+    </div>`;
+  }).join('');
+  // filtres
+  $('filterLot').innerHTML = '<option value="">Tous les lots</option>' +
+    LOTS.map(l=>`<option>${esc(l)}</option>`).join('');
+  $('filterRatioLot').innerHTML = '<option value="">Tous les lots</option>' +
+    LOTS.map(l=>`<option>${esc(l)}</option>`).join('');
+  $('ajLot').innerHTML = LOTS.map(l=>`<option>${esc(l)}</option>`).join('');
+  $('selLot').innerHTML = '<option value="">Tous les lots</option>' +
+    LOTS.map(l=>`<option>${esc(l)}</option>`).join('');
+  // counts dans la sidebar
+  $('sbCntBase').textContent = BASE.length || '';
+  $('sbCntDpgf').textContent = DPGF.length || '';
+}
+
+/* ============================================================
+   ACCUEIL
+   ============================================================ */
+function renderAccueil(){
+  // Masquer la carte d'accueil si fichier déjà lié OU si BASE non vide
+  const wc = $('welcomeCard');
+  if (wc) wc.style.display = (linkedExcelPath || BASE.length > 0) ? 'none' : 'block';
+
+  const nb   = BASE.length;
+  const reps = [...new Set(BASE.map(r=> r.repere))].length;
+  const lots = [...new Set(BASE.map(r=> r.lot))].length;
+  const moy  = nb ? BASE.reduce((s,r)=> s+r.prix, 0)/nb : 0;
+  $('statsGrid').innerHTML = `
+    <div class="stat-card"><div class="stat-val">${nb}</div><div class="stat-lbl">Prix en base</div></div>
+    <div class="stat-card"><div class="stat-val">${reps}</div><div class="stat-lbl">Repères uniques</div></div>
+    <div class="stat-card"><div class="stat-val">${lots}</div><div class="stat-lbl">Lots renseignés</div></div>
+    <div class="stat-card"><div class="stat-val">${moy.toFixed(0)} €</div><div class="stat-lbl">Prix moyen</div></div>`;
+  const rec = [...BASE].reverse().slice(0, 8);
+  $('tblRecents').innerHTML =
+    `<thead><tr><th>Repère</th><th>Désignation</th><th>Lot</th><th>Unité</th>
+      <th style="text-align:right">Prix HT</th><th>Projet</th></tr></thead>
+     <tbody>${rec.map(r=>`<tr>
+      <td><strong>${esc(r.repere)}</strong></td>
+      <td>${esc(r.designation)}</td>
+      <td><span class="badge" style="background:${lotColor(r.lot)}22;color:${lotColor(r.lot)}">${lotShort(r.lot)}</span></td>
+      <td>${esc(r.unite)}</td>
+      <td style="text-align:right"><strong>${fmtPrix(r.prix)}</strong></td>
+      <td style="font-size:10px;color:#666">${esc(r.projet)||'—'}</td>
+     </tr>`).join('')||'<tr><td colspan="6" style="text-align:center;color:#888">Aucun prix en base</td></tr>'}</tbody>`;
+}
+
+/* ============================================================
+   BASE DE PRIX (affichage + suppression + édition)
+   ============================================================ */
+function renderBase(){
+  const srch = ($('searchBase').value||'').toLowerCase();
+  const lot  = $('filterLot').value;
+  const d    = BASE.filter(r =>
+    (!lot || r.lot===lot) &&
+    (!srch || r.designation.toLowerCase().includes(srch)
+            || r.repere.toLowerCase().includes(srch)
+            || (r.projet||'').toLowerCase().includes(srch)));
+  $('baseCount').textContent = `(${d.length} prix${d.length!==BASE.length ? ' / '+BASE.length : ''})`;
+  $('tblBase').innerHTML =
+    `<thead><tr>
+      <th>Repère</th><th>Lot</th><th>Désignation</th><th>Unité</th>
+      <th style="text-align:right">Prix HT</th><th>Date</th><th>Projet</th><th></th>
+    </tr></thead>
+     <tbody>${d.map(r=>{
+       const i = BASE.indexOf(r);
+       return `<tr>
+        <td><strong>${esc(r.repere)}</strong></td>
+        <td><span class="badge" style="background:${lotColor(r.lot)}22;color:${lotColor(r.lot)}">${lotShort(r.lot)}</span></td>
+        <td>${esc(r.designation)}</td>
+        <td>${esc(r.unite)}</td>
+        <td style="text-align:right"><strong style="color:#085041">${fmtPrix(r.prix)}</strong></td>
+        <td style="color:#888;font-size:10px">${esc(r.date)||'—'}</td>
+        <td style="font-size:10px">${esc(r.projet)||'—'}</td>
+        <td style="display:flex;gap:3px">
+          <button class="btn btn-bleu" style="padding:2px 7px;font-size:10px"
+                  onclick="openEdit(${i})">✏️</button>
+          <button class="btn btn-rouge" style="padding:2px 7px;font-size:10px"
+                  onclick="delPrix(${i})">🗑</button>
+        </td>
+      </tr>`;
+     }).join('')||'<tr><td colspan="8" style="text-align:center;color:#888;padding:20px">Aucun prix trouvé</td></tr>'}</tbody>`;
+}
+function delPrix(i){
+  if (!confirm('Supprimer ce prix ?\n\n'+ BASE[i].repere +' — '+ BASE[i].designation)) return;
+  BASE.splice(i,1); save(); initUI(); renderBase(); renderAccueil();
+  toast('Prix supprimé', 'orange');
+}
+
+/* ============================================================
+   MODAL AJOUT / ÉDITION PRIX
+   ============================================================ */
+let editIndex = -1; // -1 = nouvel ajout, sinon index dans BASE
+
+function openAjout(){
+  editIndex = -1;
+  $('ajTitle').textContent = '+ Ajouter un prix';
+  const reps = [...new Set(BASE.map(r=> r.repere))].sort();
+  $('ajRepExist').innerHTML = '<option value="">— Nouveau repère —</option>' +
+    reps.map(r=>`<option>${esc(r)}</option>`).join('');
+  ['ajRepNv','ajDesg','ajProjet'].forEach(id=> $(id).value = '');
+  $('ajPrix').value = '';
+  $('ajDate').value = new Date().toISOString().slice(0,10);
+  $('ajLot').selectedIndex = 0;
+  $('ajUnite').selectedIndex = 0;
+  $('ajRatioInfo').style.display = 'none';
+  openModal('modalAjout', 'ajRepNv');
+}
+function openEdit(i){
+  editIndex = i;
+  const r = BASE[i];
+  $('ajTitle').textContent = '✏️ Modifier le prix';
+  const reps = [...new Set(BASE.map(x=> x.repere))].sort();
+  $('ajRepExist').innerHTML = '<option value="">— Nouveau repère —</option>' +
+    reps.map(x=>`<option ${x===r.repere?'selected':''}>${esc(x)}</option>`).join('');
+  $('ajRepNv').value = '';
+  $('ajLot').value   = r.lot;
+  $('ajDesg').value  = r.designation;
+  $('ajUnite').value = r.unite;
+  $('ajPrix').value  = r.prix;
+  $('ajDate').value  = r.date || '';
+  $('ajProjet').value = r.projet || '';
+  onRepChange();
+  openModal('modalAjout', 'ajPrix');
+}
+function onRepChange(){
+  const rep = $('ajRepExist').value;
+  if (!rep){ $('ajRatioInfo').style.display = 'none'; return; }
+  $('ajRepNv').value = '';
+  const matchs = BASE.filter(r=> r.repere===rep);
+  if (!matchs.length){ $('ajRatioInfo').style.display = 'none'; return; }
+  const prix = matchs.map(r=> r.prix);
+  const moy  = prix.reduce((a,b)=> a+b, 0) / prix.length;
+  // Auto-compléter lot/désignation/unité depuis la dernière occurrence
+  if (editIndex < 0) {
+    const last = matchs[matchs.length-1];
+    $('ajLot').value   = last.lot;
+    $('ajDesg').value  = last.designation;
+    $('ajUnite').value = last.unite;
+  }
+  $('ajRatioInfo').textContent =
+    `Repère existant : ${prix.length} prix · Ratio moyen : ${fmtPrix(moy)} · Dernier : ${fmtPrix(prix[prix.length-1])}`;
+  $('ajRatioInfo').style.display = 'block';
+}
+function onNvRep(){
+  if ($('ajRepNv').value) $('ajRepExist').value = '';
+  $('ajRatioInfo').style.display = 'none';
+}
+function enregistrer(){
+  const repE = $('ajRepExist').value;
+  const repN = $('ajRepNv').value.trim();
+  const rep  = repN || repE;
+  const desg = $('ajDesg').value.trim();
+  const prix = parseFloat($('ajPrix').value);
+  const lot  = $('ajLot').value;
+  if (!rep || !desg || !prix || !lot){
+    toast('Champs obligatoires : Repère, Lot, Désignation, Prix', 'rouge', 3500);
+    return;
+  }
+  const obj = {
+    repere: rep, lot, designation: desg,
+    unite: $('ajUnite').value,
+    prix, date: $('ajDate').value, projet: $('ajProjet').value.trim()
+  };
+  if (editIndex >= 0) { BASE[editIndex] = obj; toast('Prix modifié', 'bleu'); }
+  else                { BASE.push(obj);          toast('Prix ajouté', 'vert'); }
+  save(); closeModal('modalAjout');
+  initUI(); renderBase(); renderAccueil();
+}
+
+/* ============================================================
+   DPGF — Chargement multi-feuilles + détection auto
+   ============================================================ */
+function renderDPGF(){
+  $('sbCntDpgf').textContent = DPGF.length || '';
+  if (!DPGF.length){
+    $('dpgfCard').classList.add('hidden');
+    return;
+  }
+  $('dpgfCard').classList.remove('hidden');
+  const ok = DPGF.filter(r=> r.prix > 0).length;
+  $('dpgfStats').innerHTML =
+    `<span class="badge badge-vert">${ok} associés</span>
+     <span class="badge badge-rouge">${DPGF.length-ok} non associés</span>`;
+
+  const HDR = `<div class="dpgf-hdr">
+    <span>Rep. DPGF</span><span>Descriptif</span><span>U.</span><span>Qté</span>
+    <span>Repère interne</span><span>Prix unit.</span><span>Total HT</span>
+    <span>Mode</span><span></span>
+  </div>`;
+
+  const buildRow = (r, i) => `
+    <div class="dpgf-row ${r.prix>0?'ok':''}" data-idx="${i}">
+      <span style="font-size:10px;color:#666;font-family:Consolas,monospace">${esc(r.repDPGF)||'—'}</span>
+      <span title="${esc(r.descriptif)}">${esc(r.descriptif)}</span>
+      <span>${esc(r.unite)||'—'}</span>
+      <span style="text-align:right">${r.qte ? fmtQte(r.qte) : '—'}</span>
+      <input class="mini-input" type="text" value="${esc(r.repere)}"
+             list="repDatalist" placeholder="—"
+             onchange="onDpgfRepInline(${i}, this.value)">
+      <input class="mini-input" type="number" step="0.01"
+             value="${r.prix>0?r.prix:''}" placeholder="—"
+             onchange="onDpgfPrixInline(${i}, this.value)">
+      <span style="font-weight:700;text-align:right">${r.total>0?fmtPrix(r.total):'—'}</span>
+      <span class="dpgf-mode-toggle">
+        <button class="${r.mode==='exact'?'on':''}" onclick="setDpgfMode(${i},'exact')">E</button>
+        <button class="${r.mode==='ratio'?'on':''}" onclick="setDpgfMode(${i},'ratio')">R</button>
+      </span>
+      <button class="btn btn-bleu" style="padding:3px 6px;font-size:10px"
+              onclick="openSel(${i})">Choisir…</button>
+    </div>`;
+
+  // Datalist pour l'autocomplete repère
+  const reps = [...new Set(BASE.map(r=> r.repere))].sort();
+  const datalist = `<datalist id="repDatalist">${reps.map(r=>`<option value="${esc(r)}">`).join('')}</datalist>`;
+
+  if (dpgfView === 'continue'){
+    // Ajout d'une colonne Source dans une vue spéciale ? On garde simple : on indique [feuille] devant la descriptif
+    $('dpgfRows').innerHTML = datalist + HDR +
+      DPGF.map((r,i)=>{
+        const withSrc = {...r, descriptif: `[${r.sheet||'?'}] ${r.descriptif}`};
+        return buildRow(withSrc, i);
+      }).join('');
+  } else {
+    // Sections par feuille
+    const groups = {};
+    DPGF.forEach((r,i)=>{
+      const k = r.sheet || '(sans nom)';
+      (groups[k] = groups[k] || []).push({r, i});
+    });
+    $('dpgfRows').innerHTML = datalist + Object.entries(groups).map(([sheet, rows]) => {
+      const okCnt = rows.filter(x=> x.r.prix > 0).length;
+      return `
+        <div class="dpgf-section-hdr">
+          📑 ${esc(sheet)}
+          <span class="badge badge-bleu">${rows.length} lignes</span>
+          <span class="badge badge-vert">${okCnt} ok</span>
+          <span class="badge badge-rouge">${rows.length - okCnt} à associer</span>
+        </div>
+        ${HDR}
+        ${rows.map(({r, i})=> buildRow(r, i)).join('')}
+      `;
+    }).join('');
+  }
+}
+function onDpgfRepInline(i, val){
+  const r = DPGF[i];
+  r.repere = val.trim();
+  if (r.repere){
+    // Calculer le prix selon le mode
+    const matchs = BASE.filter(b=> b.repere === r.repere);
+    if (matchs.length){
+      const prix = matchs.map(m=> m.prix);
+      const moy  = prix.reduce((a,b)=> a+b, 0) / prix.length;
+      r.prix = (r.mode==='ratio' && prix.length>1) ? moy : prix[prix.length-1];
+      r.total = r.prix * (r.qte || 1);
+    }
+  } else {
+    r.prix = 0; r.total = 0;
+  }
+  renderDPGF();
+}
+function onDpgfPrixInline(i, val){
+  const v = parseFloat(val) || 0;
+  DPGF[i].prix = v;
+  DPGF[i].total = v * (DPGF[i].qte || 1);
+  renderDPGF();
+}
+function setDpgfMode(i, mode){
+  DPGF[i].mode = mode;
+  if (DPGF[i].repere) onDpgfRepInline(i, DPGF[i].repere); // recalc
+  else renderDPGF();
+}
+
+document.querySelectorAll('#viewToggle button').forEach(b=>{
+  b.addEventListener('click', ()=>{
+    document.querySelectorAll('#viewToggle button').forEach(x=> x.classList.remove('on'));
+    b.classList.add('on');
+    dpgfView = b.dataset.view;
+    renderDPGF();
+  });
+});
+
+function clearDPGF(){
+  if (!DPGF.length) return;
+  if (!confirm('Vider les '+DPGF.length+' lignes DPGF ?')) return;
+  DPGF = []; renderDPGF(); initUI(); toast('DPGF vidée', 'orange');
+}
+function associerTout(){
+  if (!DPGF.length){ toast('Aucune DPGF chargée', 'rouge'); return; }
+  let i = 0;
+  function next(){
+    while(i < DPGF.length && DPGF[i].prix > 0) i++;
+    if (i >= DPGF.length){ renderDPGF(); toast('Association terminée', 'vert'); return; }
+    gIdx = i; i++;
+    openSelRow(gIdx, next);
+  }
+  next();
+}
+
+/* ============================================================
+   DPGF — Modal sélection repère
+   ============================================================ */
+function openSel(idx){ gIdx = idx; openSelRow(idx, ()=> renderDPGF()); }
+
+function openSelRow(idx, cb){
+  gCb = cb; gSel = {}; gSelHisto = null;
+  const row = DPGF[idx];
+  $('selTitle').textContent = `Ligne ${idx+1}/${DPGF.length} — Sélection du repère`;
+  $('selDPGF').innerHTML =
+    `<strong>DPGF :</strong> ${esc(row.descriptif)} · <strong>Unité :</strong> ${esc(row.unite)||'?'} · <strong>Qté :</strong> ${(row.qte||0).toFixed(2)}`;
+  $('selSearch').value = '';
+  $('selLot').value    = '';
+  // Récupérer le mode initial : exact-last par défaut
+  const initMode = (row.mode === 'ratio') ? 'ratio'
+                 : (row.mode === 'exact-pick') ? 'exact-pick'
+                 : 'exact-last';
+  document.querySelector(`input[name="modeR"][value="${initMode}"]`).checked = true;
+  $('selApercu').textContent = 'Sélectionnez un repère...';
+  $('histoZone').classList.add('hidden');
+  filtrerRep();
+  openModal('modalSel', 'selSearch');
+}
+function filtrerRep(){
+  const srch = ($('selSearch').value||'').toLowerCase();
+  const lot  = $('selLot').value;
+  const grouped = {};
+  BASE.forEach(r=>{
+    if (!grouped[r.repere])
+      grouped[r.repere] = {rep:r.repere, lot:r.lot, desg:r.designation, unite:r.unite, prix:[]};
+    grouped[r.repere].prix.push(r.prix);
+  });
+  const items = Object.values(grouped).filter(r =>
+    (!lot || r.lot===lot) &&
+    (!srch || r.rep.toLowerCase().includes(srch) || r.desg.toLowerCase().includes(srch)));
+  $('repNb').textContent = items.length + ' repère(s)';
+  $('repList').innerHTML = items.map((r,i)=>{
+    const moy  = r.prix.reduce((a,b)=> a+b, 0) / r.prix.length;
+    const dern = r.prix[r.prix.length-1];
+    return `<div class="rep-item" id="ri${i}"
+      data-rep="${esc(r.rep)}" data-unite="${esc(r.unite)}"
+      data-moy="${moy}" data-dern="${dern}" data-cnt="${r.prix.length}">
+      <strong>${esc(r.rep)}</strong>
+      <span>${esc(r.desg)}</span>
+      <span>${esc(r.unite)}</span>
+      <span>${r.prix.length>1 ? '~'+moy.toFixed(2) : dern.toFixed(2)} €</span>
+    </div>`;
+  }).join('') || '<div style="padding:14px;text-align:center;color:#888">Aucun repère trouvé</div>';
+
+  // Délégation d'événement (plus robuste que les onclick inline)
+  $('repList').querySelectorAll('.rep-item').forEach((el, i) => {
+    el.addEventListener('click', () => {
+      selRep(i, el.dataset.rep, parseFloat(el.dataset.moy),
+             parseFloat(el.dataset.dern), parseInt(el.dataset.cnt), el.dataset.unite);
+    });
+  });
+}
+function selRep(i, rep, moy, dernier, cnt, unite){
+  document.querySelectorAll('.rep-item').forEach(el=> el.classList.remove('sel'));
+  const el = $('ri'+i); if (el) el.classList.add('sel');
+  gSel = {rep, moy, dernier, cnt, unite};
+  gSelHisto = null;
+  // Construire la liste des prix historiques pour ce repère
+  const matchs = BASE.map((b, idx) => ({b, idx}))
+                     .filter(x => x.b.repere === rep);
+  $('histoList').innerHTML = matchs.map((x, hi) => `
+    <div class="histo-item" id="hi${hi}" data-prix="${x.b.prix}" data-idx="${x.idx}">
+      <span>${esc(x.b.date) || '—'}</span>
+      <span style="font-family:Segoe UI">${esc(x.b.projet) || '—'}</span>
+      <span style="font-family:Segoe UI;font-size:10px;color:#666">${esc(x.b.designation)}</span>
+      <span class="right">${fmtPrix(x.b.prix)}</span>
+    </div>`).join('');
+  $('histoList').querySelectorAll('.histo-item').forEach((it, hi) => {
+    it.addEventListener('click', () => {
+      $('histoList').querySelectorAll('.histo-item').forEach(x => x.classList.remove('sel'));
+      it.classList.add('sel');
+      gSelHisto = parseFloat(it.dataset.prix);
+      majApercu();
+    });
+  });
+  majApercu();
+}
+
+function majApercu(){
+  if (!gSel.rep){ $('histoZone').classList.add('hidden'); return; }
+  const mode = document.querySelector('input[name="modeR"]:checked').value;
+  // Afficher la zone historique si mode exact-pick
+  if (mode === 'exact-pick'){
+    $('histoZone').classList.remove('hidden');
+  } else {
+    $('histoZone').classList.add('hidden');
+    gSelHisto = null;
+  }
+  let val;
+  if (mode === 'ratio' && gSel.cnt > 1)       val = gSel.moy;
+  else if (mode === 'exact-pick' && gSelHisto !== null) val = gSelHisto;
+  else                                         val = gSel.dernier;
+  const lbl = mode === 'ratio' ? 'ratio moyen'
+            : mode === 'exact-pick' ? (gSelHisto !== null ? 'prix sélectionné' : 'cliquez sur une ligne ci-dessus')
+            : 'dernier prix';
+  $('selApercu').innerHTML = gSelHisto === null && mode === 'exact-pick'
+    ? `<strong>${esc(gSel.rep)}</strong> · ${gSel.cnt} prix · <em>Choisissez un prix dans la liste ci-dessus</em>`
+    : `<strong>${esc(gSel.rep)}</strong> · ${gSel.cnt} prix · ` +
+      `Valeur injectée : <strong>${fmtPrix(val)}</strong> (${lbl})`;
+}
+document.querySelectorAll('input[name="modeR"]').forEach(r=> r.addEventListener('change', majApercu));
+
+function validerRep(){
+  if (!gSel.rep){ toast('Sélectionnez un repère', 'rouge'); return; }
+  const mode = document.querySelector('input[name="modeR"]:checked').value;
+  let val;
+  if (mode === 'ratio' && gSel.cnt > 1) val = gSel.moy;
+  else if (mode === 'exact-pick'){
+    if (gSelHisto === null){
+      toast('Choisissez un prix dans la liste historique', 'rouge', 3500);
+      return;
+    }
+    val = gSelHisto;
+  } else val = gSel.dernier;
+  DPGF[gIdx].repere = gSel.rep;
+  DPGF[gIdx].prix   = val;
+  DPGF[gIdx].mode   = (mode === 'ratio') ? 'ratio' : 'exact';
+  DPGF[gIdx].total  = val * (DPGF[gIdx].qte || 1);
+  closeModal('modalSel');
+  renderDPGF();
+  if (gCb) gCb();
+}
+function ignorer(){ closeModal('modalSel'); if (gCb) gCb(); }
+
+/* ============================================================
+   SAISIE MASSE — Grille éditable
+   ============================================================ */
+function emptyRow(){
+  return { repere:'', lot:'', designation:'', unite:'m2', prix:'',
+           date: new Date().toISOString().slice(0,10), projet:'' };
+}
+function addMasseRow(n=1){
+  for (let k=0; k<n; k++) MASSE.push(emptyRow());
+  renderMasse();
+}
+function delMasseRow(i){ MASSE.splice(i,1); renderMasse(); }
+function clearMasse(){
+  if (!MASSE.length) return;
+  if (!confirm('Vider toutes les lignes de saisie ?')) return;
+  MASSE = []; renderMasse();
+}
+function isRowValid(r){
+  return r.repere.trim() && r.lot && r.designation.trim() && parseFloat(r.prix) > 0;
+}
+function renderMasse(){
+  const valid = MASSE.filter(isRowValid).length;
+  $('masseCount').textContent = MASSE.length ? `(${MASSE.length} lignes)` : '';
+  $('masseValidStats').textContent = MASSE.length ?
+    `${valid} valides · ${MASSE.length-valid} incomplètes` : '';
+
+  const lotOpts = '<option value="">—</option>' + LOTS.map(l=>`<option>${esc(l)}</option>`).join('');
+  const uOpts   = ['m2','ml','m3','u','ens','kg','h','forfait'].map(u=>`<option>${u}</option>`).join('');
+  const reps    = [...new Set(BASE.map(r=> r.repere))].sort();
+  const dl      = `<datalist id="masseRepList">${reps.map(r=>`<option value="${esc(r)}">`).join('')}</datalist>`;
+
+  $('masseRows').innerHTML = dl + MASSE.map((r, i) => {
+    const cls = isRowValid(r) ? 'valid' : (Object.values(r).some(v=> String(v).trim()) ? 'error' : '');
+    return `<div class="masse-row ${cls}">
+      <span class="row-num">${i+1}</span>
+      <input type="text" value="${esc(r.repere)}" list="masseRepList" placeholder="ex: PV-001"
+             onchange="MASSE[${i}].repere=this.value;onMasseRepChange(${i});renderMasse()">
+      <select onchange="MASSE[${i}].lot=this.value;renderMasse()">
+        ${LOTS.map(l=>`<option value="${esc(l)}" ${r.lot===l?'selected':''}>${esc(l)}</option>`).join('')}
+        <option value="" ${!r.lot?'selected':''}>—</option>
+      </select>
+      <input type="text" value="${esc(r.designation)}" placeholder="Désignation..."
+             onchange="MASSE[${i}].designation=this.value;renderMasse()">
+      <select onchange="MASSE[${i}].unite=this.value">
+        ${['m2','ml','m3','u','ens','kg','h','forfait'].map(u=>`<option ${r.unite===u?'selected':''}>${u}</option>`).join('')}
+      </select>
+      <input type="number" step="0.01" value="${esc(r.prix)}" placeholder="0,00"
+             style="text-align:right"
+             onchange="MASSE[${i}].prix=this.value;renderMasse()">
+      <input type="date" value="${esc(r.date)}"
+             onchange="MASSE[${i}].date=this.value">
+      <input type="text" value="${esc(r.projet)}" placeholder="Projet..."
+             onchange="MASSE[${i}].projet=this.value">
+      <span class="row-action">
+        <button class="btn btn-rouge" style="padding:3px 7px;font-size:10px"
+                onclick="delMasseRow(${i})" title="Supprimer">🗑</button>
+      </span>
+    </div>`;
+  }).join('') || '<div style="padding:30px;text-align:center;color:#888">Aucune ligne. Cliquez sur <strong>+ 1 ligne</strong> ou <strong>+ 10 lignes</strong> pour commencer.</div>';
+}
+// Auto-compléter lot/désignation/unité quand on tape un repère existant
+function onMasseRepChange(i){
+  const rep = MASSE[i].repere.trim();
+  if (!rep) return;
+  if (MASSE[i].lot && MASSE[i].designation) return; // déjà rempli
+  const matchs = BASE.filter(b=> b.repere === rep);
+  if (matchs.length){
+    const last = matchs[matchs.length-1];
+    if (!MASSE[i].lot)         MASSE[i].lot = last.lot;
+    if (!MASSE[i].designation) MASSE[i].designation = last.designation;
+    if (!MASSE[i].unite || MASSE[i].unite==='m2') MASSE[i].unite = last.unite;
+  }
+}
+
+function validerMasse(){
+  const valides = MASSE.filter(isRowValid);
+  if (!valides.length){
+    toast('Aucune ligne valide à importer', 'rouge', 3500);
+    return;
+  }
+  if (!confirm(`Importer ${valides.length} prix dans la base ?\n${MASSE.length-valides.length} lignes incomplètes seront ignorées.`)) return;
+  valides.forEach(r => {
+    BASE.push({
+      repere: r.repere.trim(),
+      lot: r.lot,
+      designation: r.designation.trim(),
+      unite: r.unite,
+      prix: parseFloat(r.prix),
+      date: r.date,
+      projet: r.projet.trim()
+    });
+  });
+  save();
+  toast(valides.length + ' prix importés', 'vert');
+  MASSE = []; addMasseRow(5); renderMasse();
+  initUI(); renderAccueil();
+}
+
+// Coller depuis Excel
+function openMassePaste(){
+  $('pasteZone').value = '';
+  openModal('modalPaste', 'pasteZone');
+}
+function processPaste(){
+  const txt = $('pasteZone').value;
+  if (!txt.trim()){ toast('Zone vide', 'rouge'); return; }
+  const lines = txt.split(/\r?\n/).filter(l => l.trim());
+  let added = 0, header = false;
+  lines.forEach((ln, idx) => {
+    const cells = ln.split(/\t|;/);
+    // Skip header
+    if (idx === 0 && /repere|repère|lot|design/i.test(ln)) { header = true; return; }
+    const [repere='', lot='', designation='', unite='m2', prix='', date='', projet=''] = cells.map(c=> c.trim());
+    if (!repere && !designation) return;
+    // Normaliser le lot
+    let normLot = lot;
+    if (lot && !LOTS.includes(lot)){
+      const found = LOTS.find(L => L.toLowerCase().includes(lot.toLowerCase()) ||
+                                    lot.toLowerCase().includes(L.toLowerCase().split(' - ')[1]||L.toLowerCase()));
+      normLot = found || '';
+    }
+    MASSE.push({
+      repere, lot: normLot, designation,
+      unite: unite || 'm2',
+      prix: prix.replace(',', '.').replace(/[^\d.-]/g,''),
+      date: date || new Date().toISOString().slice(0,10),
+      projet
+    });
+    added++;
+  });
+  closeModal('modalPaste');
+  renderMasse();
+  toast(`${added} ligne(s) ajoutée(s)${header?' (en-tête détecté)':''}`, 'vert');
+}
+
+function appliquerProjet(){
+  if (!MASSE.length){ toast('Tableau vide', 'rouge'); return; }
+  $('applyProjet').value = '';
+  $('applyDate').value = new Date().toISOString().slice(0,10);
+  openModal('modalApply', 'applyProjet');
+}
+function confirmApplyProjet(){
+  const proj = $('applyProjet').value.trim();
+  const date = $('applyDate').value;
+  let n = 0;
+  MASSE.forEach(r => {
+    if (proj && !r.projet){ r.projet = proj; n++; }
+    if (date && !r.date) { r.date  = date; }
+  });
+  closeModal('modalApply');
+  renderMasse();
+  toast(`Appliqué sur ${n} ligne(s)`, 'vert');
+}
+
+/* ============================================================
+   RATIOS
+   ============================================================ */
+function renderRatios(){
+  const srch = ($('searchRatio').value||'').toLowerCase();
+  const lot  = $('filterRatioLot').value;
+  const g = {};
+  BASE.forEach(r=>{
+    if (!g[r.repere]) g[r.repere] = {rep:r.repere, lot:r.lot, desg:r.designation, prix:[]};
+    g[r.repere].prix.push(r.prix);
+  });
+  let items = Object.values(g).sort((a,b)=> b.prix.length - a.prix.length);
+  items = items.filter(r =>
+    (!lot || r.lot===lot) &&
+    (!srch || r.rep.toLowerCase().includes(srch) || r.desg.toLowerCase().includes(srch)));
+  $('tblRatios').innerHTML =
+    `<thead><tr><th>Repère</th><th>Lot</th><th>Désignation</th>
+       <th>Nb</th><th style="text-align:right">Ratio moyen</th>
+       <th style="text-align:right">Min</th><th style="text-align:right">Max</th>
+       <th style="text-align:right">Dernier</th></tr></thead>
+     <tbody>${items.map(r=>{
+      const moy = r.prix.reduce((a,b)=> a+b, 0) / r.prix.length;
+      return `<tr>
+        <td><strong>${esc(r.rep)}</strong></td>
+        <td><span class="badge" style="background:${lotColor(r.lot)}22;color:${lotColor(r.lot)}">${lotShort(r.lot)}</span></td>
+        <td>${esc(r.desg)}</td>
+        <td><span class="badge ${r.prix.length>1?'badge-vert':'badge-orange'}">${r.prix.length}</span></td>
+        <td style="text-align:right"><strong style="color:#085041">${fmtPrix(moy)}</strong></td>
+        <td style="text-align:right;color:#888">${fmtPrix(Math.min(...r.prix))}</td>
+        <td style="text-align:right;color:#888">${fmtPrix(Math.max(...r.prix))}</td>
+        <td style="text-align:right">${fmtPrix(r.prix[r.prix.length-1])}</td>
+      </tr>`;
+     }).join('') || '<tr><td colspan="8" style="text-align:center;color:#888;padding:20px">Aucun repère</td></tr>'}</tbody>`;
+}
+
+/* ============================================================
+   LIAISON FICHIER EXCEL — Lecture/écriture chirurgicale
+   ============================================================ */
+function updateLinkBar(){
+  const bar = $('linkBar');
+  const btn = $('btnLinkMain');
+  const expBtn = $('btnExportStandalone');
+  if (linkedExcelPath){
+    bar.classList.remove('unlinked'); bar.classList.add('linked');
+    $('lbStatus').textContent = '✅ Synchronisé';
+    $('lbPath').textContent   = linkedExcelPath;
+    $('lbExtra').innerHTML    = `<button onclick="forceSyncNow()">🔄 Sync</button>
+                                 <button onclick="window.electronAPI.openExternal(linkedExcelPath)">📂 Ouvrir</button>`;
+    btn.textContent = '✅ Fichier lié';
+    btn.classList.remove('btn-gris'); btn.classList.add('btn-vert');
+    expBtn.classList.add('hidden'); // pas besoin d'export manuel si lié
+  } else {
+    bar.classList.add('unlinked'); bar.classList.remove('linked');
+    $('lbStatus').textContent = '⛓️‍💥 Aucun fichier lié';
+    $('lbPath').textContent   = 'Cliquez sur « Lier fichier Excel » pour synchroniser.';
+    $('lbExtra').innerHTML    = '';
+    btn.textContent = '🔗 Lier fichier Excel';
+    btn.classList.add('btn-gris'); btn.classList.remove('btn-vert');
+    expBtn.classList.remove('hidden');
+  }
+}
+
+// Dropdown lien Excel — Menu kebab en overlay flottant (position fixed)
+function positionDropdown(){
+  const btn = $('btnKebab');
+  const menu = $('ddMenu');
+  const r = btn.getBoundingClientRect();
+  // Aligner le coin droit du menu sur le coin droit du bouton, juste en dessous
+  menu.style.top  = (r.bottom + 4) + 'px';
+  menu.style.right = (window.innerWidth - r.right) + 'px';
+}
+function openKebabMenu(){
+  positionDropdown();
+  // Adapter les options visibles selon que c'est lié ou non
+  const linked = !!linkedExcelPath;
+  $('ddOpenFile').style.display = linked ? 'flex' : 'none';
+  $('ddShowFile').style.display = linked ? 'flex' : 'none';
+  $('ddRelink').style.display   = linked ? 'flex' : 'none';
+  $('ddSync').style.display     = linked ? 'flex' : 'none';
+  $('ddUnlink').style.display   = linked ? 'flex' : 'none';
+  $('ddMenu').querySelectorAll('.dd-sep').forEach(s => s.style.display = linked ? 'block' : 'none');
+  $('ddMenu').classList.add('open');
+}
+function closeKebabMenu(){ $('ddMenu').classList.remove('open'); }
+
+function setupLinkDropdown(){
+  // Clic sur le bouton principal : si pas lié → lier ; si lié → message court
+  $('btnLinkMain').addEventListener('click', () => {
+    if (!linkedExcelPath) linkExcel();
+    else openKebabMenu();
+  });
+  // Bouton kebab : toujours ouvre le menu
+  $('btnKebab').addEventListener('click', e => {
+    e.stopPropagation();
+    if ($('ddMenu').classList.contains('open')) closeKebabMenu();
+    else openKebabMenu();
+  });
+  // Click outside ferme
+  document.addEventListener('click', e => {
+    if (!$('ddMenu').contains(e.target) && e.target !== $('btnKebab') && e.target !== $('btnLinkMain'))
+      closeKebabMenu();
+  });
+  // Resize repositionne
+  window.addEventListener('resize', () => {
+    if ($('ddMenu').classList.contains('open')) positionDropdown();
+  });
+  // Echap ferme
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeKebabMenu();
+  });
+
+  // Items
+  $('ddOpenFile').addEventListener('click', () => {
+    closeKebabMenu();
+    if (linkedExcelPath) window.electronAPI.openExternal(linkedExcelPath);
+  });
+  $('ddShowFile').addEventListener('click', () => {
+    closeKebabMenu();
+    if (linkedExcelPath) window.electronAPI.showInFolder(linkedExcelPath);
+  });
+  $('ddRelink').addEventListener('click', () => {
+    closeKebabMenu();
+    linkExcel();
+  });
+  $('ddSync').addEventListener('click', () => {
+    closeKebabMenu();
+    forceSyncNow();
+  });
+  $('ddExport').addEventListener('click', () => {
+    closeKebabMenu();
+    exportStandalone();
+  });
+  $('ddUnlink').addEventListener('click', () => {
+    closeKebabMenu();
+    if (!confirm('Délier le fichier Excel ?\nLa base locale ne sera plus synchronisée.')) return;
+    linkedExcelPath = null;
+    localStorage.removeItem('linkedExcelPath');
+    updateLinkBar();
+    toast('Fichier délié', 'orange');
+  });
+}
+
+async function linkExcel(){
+  if (!isElectron){ toast("Liaison disponible uniquement dans l'app Electron", 'rouge'); return; }
+  const result = await window.electronAPI.openFile([
+    { name: 'Excel', extensions: ['xlsx', 'xlsm'] }
+  ]);
+  if (!result) return;
+  // Lire le fichier avec préservation totale (styles + macros + formules)
+  try {
+    const binary = Uint8Array.from(atob(result.data), c=> c.charCodeAt(0));
+    const wb = XLSX.read(binary, {
+      type: 'array', cellStyles: true, bookVBA: true,
+      cellFormula: true, cellNF: true
+    });
+    const imported = importBaseFromWorkbook(wb);
+    if (imported < 0){
+      toast('Aucune feuille BASE_PRIX trouvée. Liaison annulée.', 'rouge', 4500);
+      return;
+    }
+    linkedExcelPath = result.path;
+    linkedExcelExt  = result.path.toLowerCase().endsWith('.xlsm') ? 'xlsm' : 'xlsx';
+    localStorage.setItem('linkedExcelPath', linkedExcelPath);
+    BASE = imported.rows;
+    save();
+    initUI(); renderAccueil(); renderBase(); updateLinkBar();
+    toast(`✅ Fichier lié — ${BASE.length} prix chargés depuis Excel`, 'vert', 4000);
+  } catch (e) {
+    console.error(e);
+    toast('Erreur lecture fichier Excel : ' + e.message, 'rouge', 5000);
+  }
+}
+
+// Importer la base depuis un workbook : retourne {rows} ou -1
+function importBaseFromWorkbook(wb){
+  const sheetName = wb.SheetNames.find(n => n === 'BASE_PRIX')
+                  || wb.SheetNames.find(n => /base.?prix/i.test(n));
+  if (!sheetName) return -1;
+  const ws = wb.Sheets[sheetName];
+  const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+  // Trouver la ligne d'en-tête (contient "Repere" ou "Designation")
+  let hi = raw.findIndex(r => r.some(c =>
+    typeof c === 'string' && /rep|design/i.test(c)));
+  if (hi < 0) hi = 1; // fallback
+  const hdrs = raw[hi].map(c => String(c).trim().toLowerCase());
+  const iRep  = hdrs.findIndex(h => /rep[eè]re/.test(h));
+  const iLot  = hdrs.findIndex(h => h.includes('lot'));
+  const iDesg = hdrs.findIndex(h => /design|descr/.test(h));
+  const iUnit = hdrs.findIndex(h => /unit/.test(h));
+  const iPrix = hdrs.findIndex(h => /prix/.test(h));
+  const iDate = hdrs.findIndex(h => /date/.test(h));
+  const iProj = hdrs.findIndex(h => /projet/.test(h));
+  const rows = [];
+  for (let i = hi+1; i < raw.length; i++){
+    const row  = raw[i];
+    if (!row || !row.length) continue;
+    const rep  = String(row[iRep>=0?iRep:0] ||'').trim();
+    const desg = String(row[iDesg>=0?iDesg:2]||'').trim();
+    const prix = parseFloat(row[iPrix>=0?iPrix:4]) || 0;
+    if (!rep || !desg || !prix) continue;
+    rows.push({
+      repere: rep,
+      lot:   String(row[iLot>=0?iLot:1] ||'').trim(),
+      designation: desg,
+      unite: String(row[iUnit>=0?iUnit:3]||'m2').trim(),
+      prix,
+      date:  formatDateCell(row[iDate>=0?iDate:5]),
+      projet:String(row[iProj>=0?iProj:6]||'').trim()
+    });
+  }
+  return { rows };
+}
+function formatDateCell(c){
+  if (!c) return '';
+  if (typeof c === 'string') return c;
+  if (typeof c === 'number'){ // date série Excel
+    try {
+      const d = XLSX.SSF.parse_date_code(c);
+      if (d) return `${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`;
+    } catch(e){}
+  }
+  if (c instanceof Date) return c.toISOString().slice(0,10);
+  return String(c);
+}
+
+// Synchronisation : ZIP-patching pur — préserve TOUT (macros, styles, formes, autres feuilles)
+// Principe : un .xlsx/.xlsm est un ZIP de fichiers XML. On modifie UNIQUEMENT le bloc
+// <sheetData>...</sheetData> de la feuille concernée, en réutilisant les attributs de
+// la première ligne data comme prototype (style "s", hauteur de ligne, etc.). Tout
+// le reste — vbaProject.bin, styles.xml, theme1.xml, drawings, conditional formatting,
+// validations, hyperliens, autres feuilles — reste identique au bit près.
+async function syncToExcel(){
+  if (!linkedExcelPath || !isElectron || syncInProgress) return;
+  syncInProgress = true;
+  try {
+    const exists = await window.electronAPI.fileExists(linkedExcelPath);
+    if (!exists){
+      toast('Fichier lié introuvable', 'rouge', 4500);
+      syncInProgress = false; return;
+    }
+    const b64 = await window.electronAPI.readFile(linkedExcelPath);
+    if (!b64){ syncInProgress = false; return; }
+    const bytes = Uint8Array.from(atob(b64), c=> c.charCodeAt(0));
+    const zip = await JSZip.loadAsync(bytes);
+
+    // 1. Mapper noms de feuilles → fichiers sheet*.xml
+    const sheetFiles = await getSheetFilenames(zip);
+    const ssMap = await getSharedStringsMap(zip);
+
+    // 2. Patcher BASE_PRIX
+    const basePrixFile = sheetFiles['BASE_PRIX']
+                      || Object.entries(sheetFiles).find(([n]) => /base.?prix/i.test(n))?.[1];
+    if (basePrixFile){
+      const xml = await zip.file(basePrixFile).async('string');
+      const dataRows = BASE.map(p => [
+        p.repere, p.lot, p.designation, p.unite,
+        p.prix, p.date || '', p.projet || ''
+      ]);
+      const newXml = patchSheetXml(xml, ssMap, /rep[eè]re|design|descrip/i, dataRows, 7);
+      zip.file(basePrixFile, newXml);
+    }
+
+    // 3. Patcher chaque feuille de lot (boucle async séquentielle)
+    for (const lot of LOTS) {
+      const lotName = Object.keys(sheetFiles).find(n =>
+        n === lot || n === lot.substring(0,31) ||
+        n.toLowerCase() === lot.toLowerCase().substring(0,31));
+      if (!lotName) continue;
+      const file = sheetFiles[lotName];
+      const lotPrix = BASE.filter(b => b.lot === lot);
+      const dataRows = lotPrix.map(p => [
+        p.repere, p.designation, p.unite,
+        p.prix, p.date || '', p.projet || ''
+      ]);
+      const xml = await zip.file(file).async('string');
+      const newXml = patchSheetXml(xml, ssMap, /rep[eè]re|design|descrip/i, dataRows, 6);
+      zip.file(file, newXml);
+    }
+
+    // 4. Régénérer le ZIP (en préservant le format binaire pour vbaProject.bin)
+    const out = await zip.generateAsync({
+      type: 'base64',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 6 }
+    });
+    const wResult = await window.electronAPI.writeFile(linkedExcelPath, out);
+    if (!wResult.success){
+      toast('⚠ Sync impossible : ' + (wResult.error || 'fichier ouvert dans Excel ?'), 'rouge', 6000);
+    }
+  } catch (e) {
+    console.error('Sync error:', e);
+    toast('Erreur sync : ' + e.message, 'rouge', 5000);
+  }
+  syncInProgress = false;
+}
+
+/* ═════════════════════════════════════════════
+   ZIP-PATCHING : utilitaires XML
+   ═════════════════════════════════════════════ */
+
+// Récupère le mapping {nom de feuille → 'xl/worksheets/sheetN.xml'}
+async function getSheetFilenames(zip){
+  const wbXml   = await zip.file('xl/workbook.xml').async('string');
+  const relsXml = await zip.file('xl/_rels/workbook.xml.rels').async('string');
+  const sheets = [];
+  // Note : on utilise [^>]*? car les attributs Target peuvent contenir des '/'
+  const sheetRe = /<sheet\b([^>]*?)\s*\/>/g; let m;
+  while ((m = sheetRe.exec(wbXml))){
+    const attrs = m[1];
+    const name = (attrs.match(/\bname="([^"]*)"/) || [])[1];
+    const rid  = (attrs.match(/\br:id="([^"]*)"/) || [])[1];
+    if (name && rid) sheets.push({ name, rid });
+  }
+  const relsMap = {};
+  const relRe = /<Relationship\b([^>]*?)\s*\/>/g;
+  while ((m = relRe.exec(relsXml))){
+    const a = m[1];
+    const id = (a.match(/\bId="([^"]*)"/) || [])[1];
+    const target = (a.match(/\bTarget="([^"]*)"/) || [])[1];
+    if (id && target) relsMap[id] = target;
+  }
+  const result = {};
+  sheets.forEach(s => {
+    let t = relsMap[s.rid];
+    if (!t) return;
+    if (t.startsWith('/')) t = t.slice(1);
+    else if (!t.startsWith('xl/')) t = 'xl/' + t;
+    result[s.name] = t;
+  });
+  return result;
+}
+
+// Lit sharedStrings.xml et retourne un tableau indexé
+async function getSharedStringsMap(zip){
+  const file = zip.file('xl/sharedStrings.xml');
+  if (!file) return [];
+  const xml = await file.async('string');
+  // Capture le contenu de chaque <si>...</si>, en concaténant les <t>...</t> internes
+  // (Excel peut splitter une chaîne en plusieurs <r><t>...</t></r>)
+  const out = [];
+  const siRe = /<si\b[^>]*>([\s\S]*?)<\/si>/g; let m;
+  while ((m = siRe.exec(xml))){
+    const inner = m[1];
+    const tRe = /<t\b[^>]*>([^<]*)<\/t>/g;
+    let s = '', t;
+    while ((t = tRe.exec(inner))) s += t[1];
+    out.push(decodeXml(s));
+  }
+  return out;
+}
+
+function decodeXml(s){
+  return String(s).replace(/&lt;/g,'<').replace(/&gt;/g,'>')
+                  .replace(/&quot;/g,'"').replace(/&apos;/g,"'")
+                  .replace(/&amp;/g,'&');
+}
+function escapeXml(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                  .replace(/"/g,'&quot;').replace(/'/g,'&apos;');
+}
+function colNumToLetter(n){
+  let s = '';
+  do { s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26) - 1; } while (n >= 0);
+  return s;
+}
+
+// Convertit YYYY-MM-DD → numéro série Excel (pour respecter le format date des cellules)
+function dateToExcelSerial(dateStr){
+  if (!dateStr || typeof dateStr !== 'string') return null;
+  const m = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const d = new Date(Date.UTC(+m[1], +m[2]-1, +m[3]));
+  // Excel : 1900-01-01 = série 1, mais bug d'année bissextile 1900 → epoch = 1899-12-30
+  return Math.floor((d - Date.UTC(1899, 11, 30)) / 86400000);
+}
+
+// Le cœur : patch chirurgical du <sheetData> d'une feuille.
+//   sheetXml : string XML brute de la feuille
+//   ssMap    : map sharedStrings (pour résoudre les chaînes en lecture)
+//   headerRegex : regex pour repérer la ligne d'en-tête (ex. /rep[eè]re/i)
+//   dataRows : nouvelles lignes data, [[v1,v2,...], ...]
+//   colCount : nombre de colonnes
+function patchSheetXml(sheetXml, ssMap, headerRegex, dataRows, colCount){
+  // 1. Localiser <sheetData>...</sheetData>
+  const sdMatch = sheetXml.match(/<sheetData\b[^>]*>([\s\S]*?)<\/sheetData>/);
+  if (!sdMatch){
+    // Cas <sheetData/> auto-fermant : on le remplace par un bloc complet
+    const empty = sheetXml.match(/<sheetData\s*\/>/);
+    if (empty){
+      const newSheetData = '<sheetData></sheetData>';
+      sheetXml = sheetXml.replace(empty[0], newSheetData);
+      return patchSheetXml(sheetXml, ssMap, headerRegex, dataRows, colCount);
+    }
+    throw new Error('Bloc <sheetData> introuvable');
+  }
+  const sdContent = sdMatch[1];
+
+  // 2. Parser toutes les rows existantes
+  const rowRe = /<row\s+([^>]*?)>([\s\S]*?)<\/row>/g;
+  const rows = []; let m;
+  while ((m = rowRe.exec(sdContent))){
+    const rowAttrs = m[1];
+    const rowInner = m[2];
+    const rNum = parseInt((rowAttrs.match(/\br="(\d+)"/) || [])[1]) || 0;
+    rows.push({ rNum, rowAttrs, rowInner, full: m[0] });
+  }
+
+  // 3. Trouver la ligne d'en-tête en cherchant le regex dans les valeurs textuelles
+  let headerRowNum = -1;
+  for (const r of rows){
+    const cells = parseCellsInRow(r.rowInner, ssMap);
+    const text = cells.map(c => c.text).join(' ');
+    if (headerRegex.test(text)){ headerRowNum = r.rNum; break; }
+  }
+  if (headerRowNum < 0){
+    // Fallback : pas de ligne d'en-tête trouvée → on ne touche à rien (sécurité)
+    console.warn('Ligne d\'en-tête introuvable dans la feuille, sync ignorée');
+    return sheetXml;
+  }
+
+  // 4. Capturer le prototype de ligne data (la première après l'en-tête, si elle existe)
+  const protoRow = rows.find(r => r.rNum === headerRowNum + 1);
+  let rowAttrTemplate = '';   // attrs de la <row> sans r=""
+  let cellTemplates = [];     // attrs de chaque <c> sans r="" et sans t=""
+  if (protoRow){
+    rowAttrTemplate = protoRow.rowAttrs
+      .replace(/\br="\d+"/, '')
+      .replace(/\bspans="[^"]*"/, '')
+      .replace(/\s+/g, ' ').trim();
+    // Parser chaque cellule : récupérer attrs (style, format)
+    const cellRe = /<c\s+([^>/]+?)(?:\/>|>([\s\S]*?)<\/c>)/g;
+    let cm;
+    while ((cm = cellRe.exec(protoRow.rowInner))){
+      let attrs = cm[1];
+      attrs = attrs.replace(/\br="[^"]*"/, '')
+                   .replace(/\bt="[^"]*"/, '')
+                   .replace(/\s+/g, ' ').trim();
+      cellTemplates.push(attrs);
+    }
+  }
+  // Compléter à colCount avec un template vide
+  while (cellTemplates.length < colCount) cellTemplates.push('');
+
+  // 5. Construire le nouveau bloc data
+  const dateColumns = detectDateColumns(rows, headerRowNum, colCount, ssMap);
+  const newRowsXml = dataRows.map((vals, ri) => {
+    const rNum = headerRowNum + 1 + ri;
+    let rowXml = `<row r="${rNum}"${rowAttrTemplate ? ' ' + rowAttrTemplate : ''}>`;
+    for (let ci = 0; ci < colCount; ci++){
+      const cellRef = colNumToLetter(ci) + rNum;
+      const cellAttr = cellTemplates[ci] || '';
+      const v = vals[ci];
+      if (v === '' || v === null || v === undefined){
+        // Cellule vide mais on garde le style si défini
+        if (cellAttr) rowXml += `<c r="${cellRef}" ${cellAttr}/>`;
+        continue;
+      }
+      // Si la colonne est un format date et qu'on a une string date → convertir en serial
+      let val = v;
+      let isNumber = typeof v === 'number';
+      if (dateColumns.has(ci) && typeof v === 'string'){
+        const ser = dateToExcelSerial(v);
+        if (ser !== null){ val = ser; isNumber = true; }
+      }
+      if (isNumber && !isNaN(val)){
+        rowXml += `<c r="${cellRef}"${cellAttr ? ' ' + cellAttr : ''}><v>${val}</v></c>`;
+      } else {
+        // Inline string (évite de toucher à sharedStrings.xml)
+        const txt = escapeXml(String(val));
+        rowXml += `<c r="${cellRef}"${cellAttr ? ' ' + cellAttr : ''} t="inlineStr"><is><t xml:space="preserve">${txt}</t></is></c>`;
+      }
+    }
+    rowXml += `</row>`;
+    return rowXml;
+  }).join('');
+
+  // 6. Conserver les rows ≤ headerRowNum, jeter les autres, et coller les nouvelles
+  const keptRows = rows.filter(r => r.rNum <= headerRowNum).map(r => r.full).join('');
+  const newSheetData = keptRows + newRowsXml;
+
+  // 7. Recomposer le XML complet
+  let newXml = sheetXml.replace(sdMatch[0],
+    sdMatch[0].replace(sdMatch[1], newSheetData));
+
+  // 8. Mettre à jour <dimension ref="..."/> si présent
+  const lastRow = headerRowNum + Math.max(dataRows.length, 0) || headerRowNum;
+  const newDimRef = `A1:${colNumToLetter(colCount-1)}${Math.max(lastRow, headerRowNum)}`;
+  newXml = newXml.replace(/<dimension\s+ref="[^"]*"\s*\/>/, `<dimension ref="${newDimRef}"/>`);
+
+  return newXml;
+}
+
+// Parse les cellules d'une <row> (texte uniquement, pour repérer la ligne d'en-tête)
+function parseCellsInRow(rowInner, ssMap){
+  const out = [];
+  // <c r="A1" t="s"><v>3</v></c>  → shared string
+  // <c r="A1" t="inlineStr"><is><t>...</t></is></c>  → inline
+  // <c r="A1"><v>123</v></c>  → number
+  const cellRe = /<c\s+([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g;
+  let m;
+  while ((m = cellRe.exec(rowInner))){
+    const attrs = m[1] || '';
+    const inner = m[2] || '';
+    const t = (attrs.match(/\bt="([^"]+)"/) || [])[1] || 'n';
+    let text = '';
+    if (t === 's'){
+      const idx = parseInt((inner.match(/<v>(\d+)<\/v>/) || [])[1]);
+      if (!isNaN(idx)) text = ssMap[idx] || '';
+    } else if (t === 'inlineStr' || t === 'str'){
+      const tm = inner.match(/<t[^>]*>([^<]*)<\/t>/);
+      text = tm ? decodeXml(tm[1]) : '';
+    } else {
+      const vm = inner.match(/<v>([^<]*)<\/v>/);
+      text = vm ? vm[1] : '';
+    }
+    out.push({ text });
+  }
+  return out;
+}
+
+// Heuristique : détermine quelles colonnes sont des dates en regardant le format
+// (numFmt) appliqué aux cellules de la première ligne data.
+function detectDateColumns(rows, headerRowNum, colCount, ssMap){
+  const protoRow = rows.find(r => r.rNum === headerRowNum + 1);
+  const dateCols = new Set();
+  if (!protoRow) return dateCols;
+  // On regarde si l'attribut `s` indique un style de date par le contexte du header
+  // → simplification : on déduit par le NOM de la colonne d'en-tête
+  const hRow = rows.find(r => r.rNum === headerRowNum);
+  if (!hRow) return dateCols;
+  const cells = parseCellsInRow(hRow.rowInner, ssMap || []);
+  cells.forEach((c, i) => {
+    if (i < colCount && /date/i.test(c.text)) dateCols.add(i);
+  });
+  return dateCols;
+}
+
+// Sync différée (debounce 800ms) — évite trop d'écritures
+function scheduleSync(){
+  if (!linkedExcelPath || !isElectron) return;
+  clearTimeout(syncDebounce);
+  syncDebounce = setTimeout(()=> syncToExcel(), 800);
+}
+async function forceSyncNow(){
+  if (!linkedExcelPath){ toast('Aucun fichier lié', 'rouge'); return; }
+  toast('🔄 Synchronisation...', 'bleu', 1500);
+  await syncToExcel();
+  setTimeout(()=> toast('✅ Synchronisé', 'vert', 1500), 100);
+}
+
+/* ============================================================
+   DPGF — Détection multi-feuilles + import
+   ============================================================ */
+function detectDPGFSheets(wb){
+  const compat = [];
+  wb.SheetNames.forEach(name => {
+    const ws = wb.Sheets[name];
+    const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    if (raw.length < 2) return;
+    // Cherche une ligne d'en-tête contenant descriptif/désignation
+    const hi = raw.findIndex(r => r.some(c =>
+      typeof c === 'string' && /(descriptif|designation|design\.|libell)/i.test(c)));
+    if (hi < 0) return;
+    const hdrs = raw[hi].map(c => String(c).trim().toLowerCase());
+    const iD = hdrs.findIndex(h => /descript|design|libell/.test(h));
+    const iR = hdrs.findIndex(h => /^rep|^ref/.test(h));
+    const iU = hdrs.findIndex(h => /unit|^un/.test(h));
+    const iQ = hdrs.findIndex(h => /qt|qua/.test(h));
+    if (iD < 0) return;
+    const dataLines = raw.slice(hi+1).filter(r => r.some(c => c !== ''));
+    if (!dataLines.length) return;
+    compat.push({ name, hi, iD, iR, iU, iQ, count: dataLines.length });
+  });
+  return compat;
+}
+function importDPGFSheets(wb, sheetsInfo){
+  const out = [];
+  sheetsInfo.forEach(info => {
+    const ws = wb.Sheets[info.name];
+    const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    raw.slice(info.hi+1).forEach(r => {
+      if (!r.some(c => c !== '')) return;
+      const desg = String(r[Math.max(info.iD, 0)] || '').trim();
+      if (!desg) return;
+      out.push({
+        sheet:      info.name,
+        repDPGF:    info.iR>=0 ? String(r[info.iR]||'').trim() : '',
+        descriptif: desg,
+        unite:      info.iU>=0 ? String(r[info.iU]||'').trim() : '',
+        qte:        info.iQ>=0 ? (parseFloat(r[info.iQ]) || 0) : 0,
+        repere: '', prix: 0, total: 0, mode: 'exact'
+      });
+    });
+  });
+  return out;
+}
+
+if (isElectron){
+  $('fileDPGFBtn').addEventListener('click', async () => {
+    const result = await window.electronAPI.openFile([
+      { name: 'Excel', extensions: ['xlsx', 'xlsm', 'xls'] }
+    ]);
+    if (!result) return;
+    const binary = Uint8Array.from(atob(result.data), c=> c.charCodeAt(0));
+    const wb = XLSX.read(binary, { type: 'array' });
+    const compat = detectDPGFSheets(wb);
+    if (!compat.length){
+      toast('Aucune feuille compatible détectée (colonnes Repère/Descriptif/Qté manquantes)', 'rouge', 5000);
+      return;
+    }
+    if (compat.length === 1){
+      DPGF = importDPGFSheets(wb, compat);
+      renderDPGF(); initUI();
+      showPage('dpgf');
+      toast(`${DPGF.length} lignes importées (1 feuille)`, 'vert');
+    } else {
+      // Plusieurs feuilles → modal de choix
+      pendingDPGFwb = wb;
+      detectedSheets = compat;
+      $('sheetsList').innerHTML = compat.map((s, i) => `
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 4px;cursor:pointer;
+                      border-bottom:1px solid #eee">
+          <input type="checkbox" checked data-sheet-idx="${i}">
+          <strong style="flex:1">${esc(s.name)}</strong>
+          <span class="badge badge-bleu">${s.count} lignes</span>
+        </label>
+      `).join('');
+      openModal('modalSheets');
+    }
+  });
+}
+function toggleAllSheets(){
+  const cbs = $('sheetsList').querySelectorAll('input[type="checkbox"]');
+  const allOn = [...cbs].every(c => c.checked);
+  cbs.forEach(c => c.checked = !allOn);
+}
+function confirmSheets(){
+  const cbs = $('sheetsList').querySelectorAll('input[type="checkbox"]');
+  const sel = [...cbs].filter(c => c.checked).map(c => detectedSheets[+c.dataset.sheetIdx]);
+  if (!sel.length){ toast('Cochez au moins une feuille', 'rouge'); return; }
+  DPGF = importDPGFSheets(pendingDPGFwb, sel);
+  closeModal('modalSheets');
+  showPage('dpgf');
+  initUI();
+  toast(`${DPGF.length} lignes importées (${sel.length} feuille${sel.length>1?'s':''})`, 'vert');
+}
+
+/* ============================================================
+   EXPORT (sans liaison) — Excel formaté
+   ============================================================ */
+async function exportStandalone(){
+  if (!isElectron){ toast('Disponible uniquement dans Electron', 'rouge'); return; }
+  const wb = XLSX.utils.book_new();
+  // BASE_PRIX
+  const bH = ['Repere Interne', 'Lot', 'Designation', 'Unite', 'Prix HT (EUR)', 'Date', 'Projet'];
+  const bR = BASE.map(r => [r.repere, r.lot, r.designation, r.unite, r.prix, r.date||'', r.projet||'']);
+  const wsB = XLSX.utils.aoa_to_sheet([bH, ...bR]);
+  wsB['!cols'] = [{wch:14},{wch:22},{wch:50},{wch:8},{wch:14},{wch:12},{wch:25}];
+  XLSX.utils.book_append_sheet(wb, wsB, 'BASE_PRIX');
+  // Feuilles par lot
+  LOTS.forEach((lot) => {
+    const prix = BASE.filter(r=> r.lot === lot);
+    if (!prix.length) return;
+    const h = ['Repere Interne', 'Designation', 'Unite', 'Prix HT (EUR)', 'Date', 'Projet'];
+    const rows = prix.map(r=> [r.repere, r.designation, r.unite, r.prix, r.date||'', r.projet||'']);
+    const ws = XLSX.utils.aoa_to_sheet([h, ...rows]);
+    ws['!cols'] = [{wch:14},{wch:50},{wch:8},{wch:14},{wch:12},{wch:25}];
+    XLSX.utils.book_append_sheet(wb, ws, lot.substring(0, 31));
+  });
+  const b64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
+  const saved = await window.electronAPI.saveFile({
+    defaultName: 'BasePrix_export.xlsx', data: b64
+  });
+  if (saved){
+    if (confirm('Fichier sauvegardé !\n' + saved + '\n\nOuvrir maintenant ?'))
+      window.electronAPI.openExternal(saved);
+  }
+}
+
+async function exportDPGF(){
+  if (!DPGF.length){ toast('Aucune DPGF chargée', 'rouge'); return; }
+  if (!isElectron){ toast('Disponible uniquement dans Electron', 'rouge'); return; }
+  const wb = XLSX.utils.book_new();
+  // Une feuille par feuille source si plusieurs
+  const groups = {};
+  DPGF.forEach(r => { (groups[r.sheet||'DPGF'] = groups[r.sheet||'DPGF']||[]).push(r); });
+  Object.entries(groups).forEach(([sheet, rows]) => {
+    const data = rows.map(r => ({
+      'Repere DPGF': r.repDPGF || '',
+      'Descriptif':  r.descriptif,
+      'Unite':       r.unite,
+      'Quantite':    r.qte,
+      'Repere Interne': r.repere || '',
+      'Prix Unit. HT':  r.prix > 0 ? r.prix : '',
+      'Total HT':       r.total > 0 ? r.total : ''
+    }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    ws['!cols'] = [{wch:12},{wch:50},{wch:8},{wch:10},{wch:14},{wch:14},{wch:14}];
+    XLSX.utils.book_append_sheet(wb, ws, sheet.substring(0,31));
+  });
+  const b64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
+  const saved = await window.electronAPI.saveFile({
+    defaultName: 'DPGF_complete.xlsx', data: b64
+  });
+  if (saved){
+    if (confirm('DPGF exportée !\n' + saved + '\n\nOuvrir maintenant ?'))
+      window.electronAPI.openExternal(saved);
+  }
+}
+
+/* ============================================================
+   BOOTSTRAP
+   ============================================================ */
+/* ============================================================
+   PARAMÈTRES — Préférences utilisateur
+   ============================================================ */
+const THEMES = [
+  { name: 'Bleu marine',  c: '#1e3a5f', c2: '#2d6a9f' },
+  { name: 'Vert forêt',   c: '#1e6e4a', c2: '#27ae60' },
+  { name: 'Violet',       c: '#5b2c83', c2: '#8e44ad' },
+  { name: 'Rouge bordeau',c: '#7a2026', c2: '#c0392b' },
+  { name: 'Anthracite',   c: '#2c3e50', c2: '#34495e' },
+  { name: 'Orange',       c: '#a85a18', c2: '#e67e22' }
+];
+
+function savePrefs(){
+  PREFS.entreprise = $('prefEntreprise')?.value || PREFS.entreprise || '';
+  PREFS.sousTitre  = $('prefSousTitre')?.value  || PREFS.sousTitre  || '';
+  localStorage.setItem('bp_prefs', JSON.stringify(PREFS));
+}
+function applyTheme(){
+  const t = THEMES.find(t => t.c === PREFS.theme) || THEMES[0];
+  document.documentElement.style.setProperty('--bleu',  t.c);
+  document.documentElement.style.setProperty('--bleu2', t.c2);
+}
+function setTheme(c){
+  PREFS.theme = c;
+  localStorage.setItem('bp_prefs', JSON.stringify(PREFS));
+  applyTheme();
+  renderParams();
+}
+
+function renderParams(){
+  // Theme picker
+  $('themeChooser').innerHTML = THEMES.map(t => `
+    <div class="theme-swatch ${PREFS.theme === t.c ? 'sel' : ''}"
+         style="background:${t.c}" title="${t.name}"
+         onclick="setTheme('${t.c}')"></div>`).join('');
+  // Lot colors
+  $('lotColorList').innerHTML = LOTS.map((l, i) => `
+    <div class="lot-color-row">
+      <span class="swatch" style="background:${PREFS.lotColors[i]||COLORS[i]}"
+            onclick="editLotColor(${i})"></span>
+      <span class="lname">${esc(l)}</span>
+    </div>`).join('');
+  // Entreprise / sous-titre
+  if ($('prefEntreprise')) $('prefEntreprise').value = PREFS.entreprise || '';
+  if ($('prefSousTitre'))  $('prefSousTitre').value  = PREFS.sousTitre  || '';
+}
+
+function editLotColor(i){
+  editingLotIdx = i;
+  $('lcTitle').textContent = `Couleur du lot — ${LOTS[i]}`;
+  $('lcPicker').value = PREFS.lotColors[i] || COLORS[i];
+  document.querySelectorAll('.color-preset').forEach(el => {
+    el.style.background = el.dataset.c;
+    el.classList.toggle('sel', el.dataset.c === PREFS.lotColors[i]);
+    el.onclick = () => {
+      $('lcPicker').value = el.dataset.c;
+      document.querySelectorAll('.color-preset').forEach(x => x.classList.remove('sel'));
+      el.classList.add('sel');
+    };
+  });
+  openModal('modalLotColor');
+}
+function confirmLotColor(){
+  if (editingLotIdx < 0) return;
+  PREFS.lotColors[editingLotIdx] = $('lcPicker').value;
+  localStorage.setItem('bp_prefs', JSON.stringify(PREFS));
+  closeModal('modalLotColor');
+  renderParams();
+  initUI(); renderBase(); renderAccueil();
+  toast('Couleur appliquée', 'vert');
+}
+function resetLotColors(){
+  if (!confirm('Réinitialiser toutes les couleurs des lots aux valeurs par défaut ?')) return;
+  PREFS.lotColors = [...DEFAULT_LOT_COLORS];
+  localStorage.setItem('bp_prefs', JSON.stringify(PREFS));
+  renderParams();
+  initUI(); renderBase(); renderAccueil();
+  toast('Couleurs réinitialisées', 'orange');
+}
+
+/* ============================================================
+   MAINTENANCE — Sauvegarde / restauration
+   ============================================================ */
+async function exportBackup(){
+  const data = { base: BASE, prefs: PREFS, exportedAt: new Date().toISOString() };
+  const json = JSON.stringify(data, null, 2);
+  if (!isElectron){
+    // Téléchargement via blob
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `BasePrix_backup_${new Date().toISOString().slice(0,10)}.json`;
+    a.click(); URL.revokeObjectURL(url);
+    return;
+  }
+  const b64 = btoa(unescape(encodeURIComponent(json)));
+  const saved = await window.electronAPI.saveFile({
+    defaultName: `BasePrix_backup_${new Date().toISOString().slice(0,10)}.json`,
+    filters: [{name:'JSON', extensions:['json']}],
+    data: b64
+  });
+  if (saved) toast('Sauvegarde enregistrée', 'vert');
+}
+async function importBackup(){
+  if (!isElectron){ toast('Disponible uniquement dans Electron', 'rouge'); return; }
+  const result = await window.electronAPI.openFile([{name:'JSON', extensions:['json']}]);
+  if (!result) return;
+  try {
+    const txt = decodeURIComponent(escape(atob(result.data)));
+    const data = JSON.parse(txt);
+    if (!Array.isArray(data.base)){
+      toast('Fichier invalide', 'rouge'); return;
+    }
+    if (!confirm(`Restaurer ${data.base.length} prix ?\nLa base actuelle sera remplacée.`)) return;
+    BASE = data.base;
+    if (data.prefs){ PREFS = {...PREFS, ...data.prefs}; localStorage.setItem('bp_prefs', JSON.stringify(PREFS)); }
+    save(); applyTheme(); initUI(); renderAccueil(); renderBase(); renderParams();
+    toast('Sauvegarde restaurée', 'vert');
+  } catch(e){
+    toast('Erreur lecture sauvegarde : ' + e.message, 'rouge', 4000);
+  }
+}
+function resetAll(){
+  if (!confirm('⚠️ EFFACER toutes les données (prix + préférences) ?\nCette action est irréversible.')) return;
+  if (!confirm('Vraiment SÛR ? Tout sera perdu.')) return;
+  localStorage.removeItem('bp');
+  localStorage.removeItem('bp_prefs');
+  localStorage.removeItem('linkedExcelPath');
+  location.reload();
+}
+
+/* ============================================================
+   GÉNÉRATION DE TEMPLATE EXCEL — Feuille de base prête à l'emploi
+   ============================================================ */
+function openModalGen(){
+  $('genEntreprise').value = PREFS.entreprise || '';
+  $('genSousTitre').value  = PREFS.sousTitre  || '';
+  $('genLierApres').checked = isElectron;
+  if (!isElectron) $('genLierApres').disabled = true;
+  openModal('modalGen', 'genEntreprise');
+}
+
+async function confirmGenererTemplate(){
+  const ent  = $('genEntreprise').value.trim() || 'Mon entreprise';
+  const sub  = $('genSousTitre').value.trim();
+  const lier = $('genLierApres').checked;
+  PREFS.entreprise = ent;
+  PREFS.sousTitre  = sub;
+  localStorage.setItem('bp_prefs', JSON.stringify(PREFS));
+  closeModal('modalGen');
+  await generateExcelTemplate(ent, sub, lier);
+}
+
+async function generateExcelTemplate(ent, sub, lierApres){
+  if (!isElectron && !window.XLSX){ toast('Génération impossible sans Electron', 'rouge'); return; }
+  const wb = XLSX.utils.book_new();
+  const themeCol  = (PREFS.theme || '#1e3a5f').replace('#','').toUpperCase().padStart(6,'0');
+  const theme2Col = (THEMES.find(t => t.c === PREFS.theme)?.c2 || '#2d6a9f').replace('#','').toUpperCase().padStart(6,'0');
+
+  // === Helper pour styles ===
+  const sTitle = {
+    font: { bold: true, sz: 18, color: { rgb: 'FFFFFFFF' } },
+    fill: { fgColor: { rgb: 'FF' + themeCol } },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: { bottom: { style: 'medium', color: { rgb: 'FF' + theme2Col } } }
+  };
+  const sSub = {
+    font: { italic: true, sz: 10, color: { rgb: 'FFFFFFFF' } },
+    fill: { fgColor: { rgb: 'FF' + theme2Col } },
+    alignment: { horizontal: 'center', vertical: 'center' }
+  };
+  const sHdr = {
+    font: { bold: true, sz: 11, color: { rgb: 'FFFFFFFF' } },
+    fill: { fgColor: { rgb: 'FF' + theme2Col } },
+    alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+    border: {
+      top:    { style: 'thin', color: { rgb: 'FF000000' } },
+      bottom: { style: 'medium', color: { rgb: 'FF000000' } },
+      left:   { style: 'thin', color: { rgb: 'FF000000' } },
+      right:  { style: 'thin', color: { rgb: 'FF000000' } }
+    }
+  };
+  const sCellTxt = {
+    font: { sz: 11, color: { rgb: 'FF333333' } },
+    fill: { fgColor: { rgb: 'FFF8FAFC' } },
+    alignment: { vertical: 'center' },
+    border: {
+      top:    { style: 'thin', color: { rgb: 'FFCCCCCC' } },
+      bottom: { style: 'thin', color: { rgb: 'FFCCCCCC' } },
+      left:   { style: 'thin', color: { rgb: 'FFCCCCCC' } },
+      right:  { style: 'thin', color: { rgb: 'FFCCCCCC' } }
+    }
+  };
+  const sCellPrix = { ...sCellTxt, numFmt: '#,##0.00 "€"',
+                      font: { sz: 11, bold: true, color: { rgb: 'FF085041' } },
+                      alignment: { horizontal: 'right', vertical: 'center' } };
+  const sCellDate = { ...sCellTxt, numFmt: 'yyyy-mm-dd',
+                      alignment: { horizontal: 'center', vertical: 'center' } };
+  const sBtn = {
+    font: { bold: true, sz: 12, color: { rgb: 'FFFFFFFF' }, underline: false },
+    fill: { fgColor: { rgb: 'FF' + theme2Col } },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: {
+      top:    { style: 'thin', color: { rgb: 'FF000000' } },
+      bottom: { style: 'thin', color: { rgb: 'FF000000' } },
+      left:   { style: 'thin', color: { rgb: 'FF000000' } },
+      right:  { style: 'thin', color: { rgb: 'FF000000' } }
+    }
+  };
+  const sLotName = (lotColRGB) => ({
+    font: { bold: true, sz: 12, color: { rgb: 'FFFFFFFF' } },
+    fill: { fgColor: { rgb: 'FF' + lotColRGB } },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: { all: { style: 'thin', color: { rgb: 'FF000000' } } }
+  });
+
+  // === FEUILLE MENU ===
+  const menuData = [
+    [{ v: ent, s: sTitle }],
+    [{ v: sub || ' ', s: sSub }],
+    [{ v: 'BASE DE PRIX & DPGF — Sommaire', s: { font:{bold:true,sz:13}, alignment:{horizontal:'center'} } }],
+    [{ v: 'Cliquez sur un nom pour accéder à la feuille', s: { font:{italic:true,sz:9,color:{rgb:'FF777777'}}, alignment:{horizontal:'center'} } }],
+    [],
+    [{ v: '📊 BASE DE PRIX (catalogue complet)', s: sBtn,
+       l: { Target: '#BASE_PRIX!A1', Tooltip: 'Aller à BASE_PRIX' } }],
+    []
+  ];
+  // Lots : 14 lignes avec hyperlien
+  LOTS.forEach((lot, i) => {
+    const colHex = (PREFS.lotColors[i] || COLORS[i]).replace('#','').toUpperCase().padStart(6,'0');
+    menuData.push([{
+      v: `🏗 ${lot}`,
+      s: sLotName(colHex),
+      l: { Target: `#'${lot}'!A1`, Tooltip: `Aller à ${lot}` }
+    }]);
+  });
+  const wsMenu = XLSX.utils.aoa_to_sheet(menuData);
+  wsMenu['!cols']   = [{ wch: 60 }];
+  wsMenu['!merges'] = [
+    { s:{r:0,c:0}, e:{r:0,c:0} }
+  ];
+  // Hauteurs
+  wsMenu['!rows'] = [{hpt:36},{hpt:18},{hpt:24},{hpt:14},{hpt:6},{hpt:32},{hpt:6}];
+  for (let i = 0; i < LOTS.length; i++) wsMenu['!rows'].push({hpt:26});
+  XLSX.utils.book_append_sheet(wb, wsMenu, 'MENU');
+
+  // === FEUILLE BASE_PRIX ===
+  const bpData = [
+    [{ v: 'BASE DE PRIX — Catalogue complet', s: sTitle }, '', '', '', '', '', ''],
+    [{ v: '← MENU', s: sBtn, l: { Target: '#MENU!A1', Tooltip: 'Retour au menu' } }, '', '', '', '', '', ''],
+    [
+      { v:'Repere Interne', s:sHdr },{ v:'Lot', s:sHdr },{ v:'Designation', s:sHdr },
+      { v:'Unite', s:sHdr },{ v:'Prix HT (EUR)', s:sHdr },{ v:'Date', s:sHdr },{ v:'Projet', s:sHdr }
+    ],
+    // Ligne d'exemple (mise en forme)
+    [
+      { v:'EX-001', s:sCellTxt },{ v:'03 - Etancheite', s:sCellTxt },
+      { v:'Exemple — supprimez cette ligne avant utilisation', s:sCellTxt },
+      { v:'m2', s:sCellTxt },{ v:0, s:sCellPrix },
+      { v:new Date().toISOString().slice(0,10), s:sCellTxt },{ v:'Exemple', s:sCellTxt }
+    ]
+  ];
+  const wsBP = XLSX.utils.aoa_to_sheet(bpData);
+  wsBP['!cols']   = [{wch:14},{wch:22},{wch:55},{wch:8},{wch:14},{wch:12},{wch:25}];
+  wsBP['!merges'] = [{ s:{r:0,c:0}, e:{r:0,c:6} }];
+  wsBP['!rows']   = [{hpt:34},{hpt:24},{hpt:30},{hpt:22}];
+  XLSX.utils.book_append_sheet(wb, wsBP, 'BASE_PRIX');
+
+  // === 14 FEUILLES DE LOT ===
+  LOTS.forEach((lot, i) => {
+    const colHex = (PREFS.lotColors[i] || COLORS[i]).replace('#','').toUpperCase().padStart(6,'0');
+    const sLotTitle = {
+      font: { bold: true, sz: 16, color: { rgb: 'FFFFFFFF' } },
+      fill: { fgColor: { rgb: 'FF' + colHex } },
+      alignment: { horizontal: 'center', vertical: 'center' }
+    };
+    const data = [
+      [{ v: lot, s: sLotTitle }, '', '', '', '', ''],
+      [{ v: '← MENU', s: sBtn, l: { Target: '#MENU!A1' } }, '', '', '', '', ''],
+      [
+        { v:'Repere Interne', s:sHdr },{ v:'Designation', s:sHdr },
+        { v:'Unite', s:sHdr },{ v:'Prix HT (EUR)', s:sHdr },{ v:'Date', s:sHdr },{ v:'Projet', s:sHdr }
+      ],
+      [
+        { v:'', s:sCellTxt },{ v:'', s:sCellTxt },{ v:'', s:sCellTxt },
+        { v:'', s:sCellPrix },{ v:'', s:sCellTxt },{ v:'', s:sCellTxt }
+      ]
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    ws['!cols']   = [{wch:14},{wch:55},{wch:8},{wch:14},{wch:12},{wch:25}];
+    ws['!merges'] = [{ s:{r:0,c:0}, e:{r:0,c:5} }];
+    ws['!rows']   = [{hpt:32},{hpt:24},{hpt:28},{hpt:20}];
+    XLSX.utils.book_append_sheet(wb, ws, lot.substring(0,31));
+  });
+
+  // === ENREGISTREMENT ===
+  const b64 = XLSX.write(wb, {
+    type: 'base64', bookType: 'xlsx', cellStyles: true
+  });
+  const dn = `BasePrix_${ent.replace(/[^a-zA-Z0-9]/g,'_').slice(0,20)}_${new Date().toISOString().slice(0,10)}.xlsx`;
+  if (!isElectron){
+    // Téléchargement via blob
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = dn; a.click();
+    URL.revokeObjectURL(url);
+    toast('✅ Fichier généré', 'vert');
+    return;
+  }
+  const saved = await window.electronAPI.saveFile({
+    defaultName: dn,
+    filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+    data: b64
+  });
+  if (!saved) return;
+  toast('✅ Fichier généré', 'vert', 2500);
+
+  // Lier directement si demandé
+  if (lierApres){
+    setTimeout(async () => {
+      // Lecture du fichier qu'on vient d'enregistrer pour récupérer son chemin
+      linkedExcelPath = saved;
+      linkedExcelExt  = saved.toLowerCase().endsWith('.xlsm') ? 'xlsm' : 'xlsx';
+      localStorage.setItem('linkedExcelPath', linkedExcelPath);
+      updateLinkBar();
+      // BASE est vide ou contient les anciennes données — comme c'est nouveau, on ne fait rien
+      toast('🔗 Fichier généré et lié', 'vert', 3500);
+    }, 500);
+  } else {
+    if (confirm('Fichier généré !\n' + saved + '\n\nOuvrir le fichier maintenant ?')){
+      window.electronAPI.openExternal(saved);
+    }
+  }
+}
+
+/* ============================================================
+   TRAME EXCEL pour la SAISIE MASSE
+   ============================================================ */
+async function genererTrameMasse(){
+  const themeCol  = (PREFS.theme || '#1e3a5f').replace('#','').toUpperCase().padStart(6,'0');
+  const theme2Col = (THEMES.find(t => t.c === PREFS.theme)?.c2 || '#2d6a9f').replace('#','').toUpperCase().padStart(6,'0');
+  const sTitle = {
+    font: { bold: true, sz: 14, color: { rgb: 'FFFFFFFF' } },
+    fill: { fgColor: { rgb: 'FF' + themeCol } },
+    alignment: { horizontal: 'center', vertical: 'center' }
+  };
+  const sHdr = {
+    font: { bold: true, sz: 11, color: { rgb: 'FFFFFFFF' } },
+    fill: { fgColor: { rgb: 'FF' + theme2Col } },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: { all: { style: 'thin', color: { rgb: 'FF000000' } } }
+  };
+  const sInfo = {
+    font: { italic: true, sz: 10, color: { rgb: 'FF666666' } },
+    fill: { fgColor: { rgb: 'FFFFF8E5' } },
+    alignment: { wrapText: true, vertical: 'center' }
+  };
+  const sCell = {
+    font: { sz: 11 },
+    fill: { fgColor: { rgb: 'FFFFFFFF' } },
+    alignment: { vertical: 'center' },
+    border: { all: { style: 'thin', color: { rgb: 'FFDDDDDD' } } }
+  };
+  const sPrix = { ...sCell, numFmt: '#,##0.00', alignment: { horizontal: 'right' } };
+
+  const wb = XLSX.utils.book_new();
+  // Feuille INSTRUCTIONS
+  const inst = [
+    [{ v: 'TRAME D\'IMPORTATION DE PRIX EN MASSE', s: sTitle }],
+    [{ v: '', s: sCell }],
+    [{ v: 'Comment utiliser cette trame :', s: { font:{bold:true,sz:12} } }],
+    [{ v: '1. Allez dans la feuille SAISIE et remplissez les colonnes ligne par ligne.', s: sInfo }],
+    [{ v: '2. Les colonnes en gras (Repere, Lot, Designation, Prix HT) sont OBLIGATOIRES.', s: sInfo }],
+    [{ v: '3. Le Lot doit être l\'un des 14 lots listés ci-dessous (copiez-collez la valeur exacte).', s: sInfo }],
+    [{ v: '4. Une fois remplie, retournez dans l\'application > Saisie masse > "Importer trame remplie".', s: sInfo }],
+    [{ v: '', s: sCell }],
+    [{ v: 'Lots disponibles :', s: { font:{bold:true,sz:11} } }]
+  ];
+  LOTS.forEach((lot, i) => {
+    const col = (PREFS.lotColors[i] || COLORS[i]).replace('#','').toUpperCase().padStart(6,'0');
+    inst.push([{
+      v: lot,
+      s: { font:{bold:true,color:{rgb:'FFFFFFFF'}}, fill:{fgColor:{rgb:'FF'+col}},
+           alignment:{horizontal:'center'} }
+    }]);
+  });
+  const wsInst = XLSX.utils.aoa_to_sheet(inst);
+  wsInst['!cols'] = [{ wch: 75 }];
+  wsInst['!rows'] = [{hpt:30}];
+  XLSX.utils.book_append_sheet(wb, wsInst, 'INSTRUCTIONS');
+
+  // Feuille SAISIE
+  const data = [
+    [
+      { v: 'Repere Interne *', s: sHdr },
+      { v: 'Lot *', s: sHdr },
+      { v: 'Designation *', s: sHdr },
+      { v: 'Unite', s: sHdr },
+      { v: 'Prix HT (EUR) *', s: sHdr },
+      { v: 'Date', s: sHdr },
+      { v: 'Projet', s: sHdr }
+    ]
+  ];
+  // 30 lignes vides à remplir
+  for (let i = 0; i < 30; i++) {
+    data.push([
+      { v: '', s: sCell }, { v: '', s: sCell }, { v: '', s: sCell }, { v: '', s: sCell },
+      { v: '', s: sPrix }, { v: '', s: sCell }, { v: '', s: sCell }
+    ]);
+  }
+  const wsSai = XLSX.utils.aoa_to_sheet(data);
+  wsSai['!cols'] = [{wch:14},{wch:22},{wch:55},{wch:8},{wch:14},{wch:12},{wch:25}];
+  wsSai['!rows'] = [{hpt:30}];
+  XLSX.utils.book_append_sheet(wb, wsSai, 'SAISIE');
+
+  const b64 = XLSX.write(wb, { type:'base64', bookType:'xlsx', cellStyles:true });
+  const dn  = `TrameMasse_${new Date().toISOString().slice(0,10)}.xlsx`;
+  if (!isElectron){
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = dn; a.click();
+    URL.revokeObjectURL(url);
+    return;
+  }
+  const saved = await window.electronAPI.saveFile({
+    defaultName: dn,
+    filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+    data: b64
+  });
+  if (saved){
+    toast('Trame générée — remplissez-la puis ré-importez', 'vert', 3500);
+    if (confirm('Trame enregistrée !\nVoulez-vous l\'ouvrir maintenant pour la remplir ?'))
+      window.electronAPI.openExternal(saved);
+  }
+}
+
+async function importerTrameMasse(){
+  if (!isElectron){ toast('Disponible uniquement dans Electron', 'rouge'); return; }
+  const result = await window.electronAPI.openFile([
+    { name: 'Excel', extensions: ['xlsx', 'xlsm', 'xls'] }
+  ]);
+  if (!result) return;
+  try {
+    const bytes = Uint8Array.from(atob(result.data), c => c.charCodeAt(0));
+    const wb = XLSX.read(bytes, { type: 'array' });
+    // Cherche la feuille SAISIE (ou la 1ère feuille avec une colonne Repere)
+    let sheetName = wb.SheetNames.find(n => /sai/i.test(n)) || wb.SheetNames[0];
+    const ws = wb.Sheets[sheetName];
+    const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    if (raw.length < 2){ toast('Feuille vide', 'rouge'); return; }
+    // En-tête : ligne avec "Repere"
+    const hi = raw.findIndex(r => r.some(c => typeof c === 'string' && /rep[eè]re/i.test(c)));
+    if (hi < 0){ toast('Aucune colonne « Repère » détectée', 'rouge', 3500); return; }
+    const hdrs = raw[hi].map(c => String(c).trim().toLowerCase());
+    const iRep = hdrs.findIndex(h => /rep[eè]re/.test(h));
+    const iLot = hdrs.findIndex(h => /^lot/.test(h));
+    const iDes = hdrs.findIndex(h => /design|descr/.test(h));
+    const iUni = hdrs.findIndex(h => /unit/.test(h));
+    const iPrx = hdrs.findIndex(h => /prix/.test(h));
+    const iDat = hdrs.findIndex(h => /date/.test(h));
+    const iPro = hdrs.findIndex(h => /projet/.test(h));
+    const newRows = [];
+    for (let i = hi + 1; i < raw.length; i++){
+      const r = raw[i];
+      if (!r || !r.some(c => c !== '')) continue;
+      const rep  = String(r[iRep] || '').trim();
+      const desg = String(r[iDes] || '').trim();
+      const prix = parseFloat(String(r[iPrx] || '').replace(',','.').replace(/[^\d.-]/g,''));
+      if (!rep && !desg) continue;
+      let lot = String(r[iLot] || '').trim();
+      if (lot && !LOTS.includes(lot)){
+        const found = LOTS.find(L => L.toLowerCase().includes(lot.toLowerCase()) ||
+                                     L.toLowerCase().split(' - ')[1] === lot.toLowerCase());
+        lot = found || lot;
+      }
+      newRows.push({
+        repere: rep, lot,
+        designation: desg,
+        unite: String(r[iUni] || 'm2').trim() || 'm2',
+        prix: isNaN(prix) ? '' : prix,
+        date: formatDateCell(r[iDat]) || new Date().toISOString().slice(0,10),
+        projet: String(r[iPro] || '').trim()
+      });
+    }
+    if (!newRows.length){
+      toast('Aucune ligne valide trouvée dans la trame', 'rouge', 3500);
+      return;
+    }
+    if (MASSE.length > 0 && MASSE.some(r => Object.values(r).some(v => String(v).trim()))){
+      if (!confirm(`Le tableau contient déjà ${MASSE.length} lignes.\nLes remplacer par les ${newRows.length} lignes du fichier ?`)){
+        // Ajouter à la suite
+        MASSE = [...MASSE, ...newRows];
+      } else {
+        MASSE = newRows;
+      }
+    } else {
+      MASSE = newRows;
+    }
+    showPage('masse');
+    renderMasse();
+    const valides = MASSE.filter(isRowValid).length;
+    toast(`✅ ${newRows.length} lignes importées dans la grille (${valides} valides)`, 'vert', 4000);
+  } catch (e){
+    console.error(e);
+    toast('Erreur lecture trame : ' + e.message, 'rouge', 5000);
+  }
+}
+
+
+/* ============================================================
+   BOOTSTRAP
+   ============================================================ */
+async function bootstrap(){
+  applyTheme();
+  initUI();
+  renderParams();
+
+  if (isElectron){
+    setupLinkDropdown();
+    $('btnExportStandalone').addEventListener('click', exportStandalone);
+
+    // Si fichier déjà lié au démarrage, recharger depuis Excel (le fichier fait foi)
+    if (linkedExcelPath){
+      const exists = await window.electronAPI.fileExists(linkedExcelPath);
+      if (exists){
+        try {
+          const b64 = await window.electronAPI.readFile(linkedExcelPath);
+          const binary = Uint8Array.from(atob(b64), c=> c.charCodeAt(0));
+          const wb = XLSX.read(binary, {
+            type: 'array', cellStyles: true, bookVBA: true, cellFormula: true
+          });
+          const imported = importBaseFromWorkbook(wb);
+          if (imported && imported !== -1){
+            BASE = imported.rows; save();
+            toast(`✅ Fichier lié — ${BASE.length} prix chargés`, 'vert', 2500);
+          }
+        } catch(e){
+          console.error(e);
+          toast('Impossible de relire le fichier lié', 'rouge', 4000);
+        }
+      } else {
+        toast('Fichier lié introuvable', 'rouge', 4000);
+        linkedExcelPath = null;
+        localStorage.removeItem('linkedExcelPath');
+      }
+    }
+  } else {
+    // Mode navigateur : masquer les boutons Electron
+    $('btnLinkMain').style.display = 'none';
+    document.querySelector('.link-bar').style.display = 'none';
+    $('btnExportStandalone').style.display = 'none';
+    $('fileDPGFBtn').textContent = 'Mode navigateur — fonctions limitées';
+    $('fileDPGFBtn').disabled = true;
+  }
+
+  updateLinkBar();
+
+  // Données de démo si base vide ET pas de fichier lié
+  if (!BASE.length && !linkedExcelPath){
+    BASE = [
+      {repere:'PV-001',  lot:'03 - Etancheite', designation:'Pare vapeur sur support beton', unite:'m2', prix:13.22, date:'2024-01-10', projet:'Ecole Jean Moulin'},
+      {repere:'PV-001',  lot:'03 - Etancheite', designation:'Pare vapeur sur bac acier',     unite:'m2', prix:13.50, date:'2024-03-05', projet:'Residence Les Pins'},
+      {repere:'ISO-001', lot:'03 - Etancheite', designation:'Isolation thermique toiture',   unite:'m2', prix:60.00, date:'2024-01-10', projet:'Ecole Jean Moulin'},
+      {repere:'ETN-001', lot:'03 - Etancheite', designation:'Etancheite bicouche',           unite:'m2', prix:35.00, date:'2024-02-01', projet:'Mairie Centre'},
+      {repere:'BET-001', lot:'04 - Gros Oeuvre',designation:'Structure beton arme',          unite:'m3', prix:320.00,date:'2024-02-15', projet:'Mairie Centre'}
+    ];
+    localStorage.setItem('bp', JSON.stringify(BASE));
+  }
+
+  initUI();
+  renderAccueil();
+}
+
+bootstrap();
+
+</script>
+</body>
+</html>
