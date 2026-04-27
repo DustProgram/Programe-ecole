@@ -57,7 +57,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Base de Prix",
-      "appPackageUrl": "https://github.com/TON_PSEUDO/baseprix/releases/download/v${version}/"
+      "appPackageUrl": "https://github.com/DustProgram/Programe-ecole/releases/download/v${version}/"
     }
   }
 }
