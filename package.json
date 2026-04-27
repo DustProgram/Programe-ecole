@@ -1,14 +1,14 @@
 {
   "name": "base-de-prix",
-  "version": "2.0.0",
+  "version": "2.2.0",
   "description": "Outil de gestion de base de prix et DPGF",
   "main": "main.js",
-  "author": "EURL PROMORAME",
+  "author": "Nathan RAMEDACE",
   "license": "MIT",
   "scripts": {
-    "start":  "electron .",
-    "build":  "electron-builder --win --x64",
-    "buildmac": "electron-builder --mac"
+    "start":     "electron .",
+    "build":     "electron-builder --win --x64",
+    "build-web": "electron-builder --win nsis-web --x64"
   },
   "devDependencies": {
     "electron": "^28.0.0",
@@ -27,7 +27,10 @@
       "icon.png"
     ],
     "win": {
-      "target": "nsis",
+      "target": [
+        { "target": "nsis",     "arch": ["x64"] },
+        { "target": "nsis-web", "arch": ["x64"] }
+      ],
       "icon": "icon.png"
     },
     "nsis": {
@@ -36,6 +39,14 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Base de Prix"
+    },
+    "nsisWeb": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Base de Prix",
+      "appPackageUrl": "https://github.com/DustProgram/Programe-ecole/releases/download/v${version}/"
     }
   }
 }
