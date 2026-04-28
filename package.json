@@ -1,6 +1,6 @@
 {
   "name": "base-de-prix",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "description": "Outil de gestion de base de prix et DPGF",
   "main": "main.js",
   "author": "Nathan RAMEDACE",
@@ -49,7 +49,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Base de Prix"
+      "shortcutName": "Base de Prix",
+      "artifactName": "Base-de-Prix-Setup-${version}.${ext}"
     },
     "nsisWeb": {
       "oneClick": false,
@@ -57,7 +58,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Base de Prix",
-      "appPackageUrl": "https://github.com/DustProgram/Programe-ecole/releases/download/v${version}/"
+      "appPackageUrl": "https://github.com/DustProgram/Programe-ecole/releases/download/v${version}/",
+      "artifactName": "Base-de-Prix-Web-Setup-${version}.${ext}"
     }
   }
 }
