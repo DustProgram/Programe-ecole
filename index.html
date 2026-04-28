@@ -2149,7 +2149,7 @@ function genererTrameMasse() {
   const wb = XLSX.utils.book_new();
   const data = [
     ['Repère', 'Lot', 'Désignation', 'Unité', 'Prix HT', 'Date', 'Projet'],
-    ['ex: PV-001', LOTS[2] || '03 - Etancheite', 'ex: Pare vapeur', 'm2', 13.5, new Date().toISOString().slice(0,10), 'ex: Hôtel B&B']
+    ['ex: PV-001', LOTS[2] || '03 - Etancheite', 'ex: Pare vapeur', 'm2', 13.5, new Date().toISOString().slice(0,10), 'ex: Résidence Les Pins']
   ];
   // Ajouter une ligne vide pour les utilisateurs
   for (let i = 0; i < 30; i++) data.push(['', '', '', '', '', '', '']);
