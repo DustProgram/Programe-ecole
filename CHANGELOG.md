@@ -291,6 +291,5 @@ npm run publish
 
 ## 📄 Auteur
 
-**Nathan RAMEDACE** — EURL PROMORAME
-Schoelcher, Martinique
+**Nathan RAMEDACE**
 Avril 2026
