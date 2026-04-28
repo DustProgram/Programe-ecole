@@ -965,8 +965,8 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
         <div class="lbl">⚠️ Conflits</div>
       </div>
     </div>
-    <details style="margin-top:10px">
-      <summary style="cursor:pointer;font-weight:700;color:var(--bleu);font-size:12px">🔍 Voir le détail</summary>
+    <details open style="margin-top:10px">
+      <summary style="cursor:pointer;font-weight:700;color:var(--bleu);font-size:12px">🔍 Détail des changements (cliquer pour replier)</summary>
       <div class="conflict-detail" id="conflictDetail" style="margin-top:6px"></div>
     </details>
     <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px">
@@ -2904,66 +2904,183 @@ async function syncToExcel(forced) {
 }
 
 async function computeConflict() {
-  // Lire le fichier officiel et le cache pour comparer
-  const remoteB64 = await window.electronAPI.readFile(linkedExcelPath);
-  const cacheB64 = await readFromCache();
-  const remoteWb = XLSX.read(remoteB64, {type:'base64'});
-  const remoteWs = remoteWb.Sheets['BASE_PRIX'];
-  const remotePrices = parseBaseSheet(remoteWs);
-
-  let cachePrices = [];
-  if (cacheB64) {
-    const cacheWb = XLSX.read(cacheB64, {type:'base64'});
-    const cacheWs = cacheWb.Sheets['BASE_PRIX'];
-    cachePrices = parseBaseSheet(cacheWs);
-  }
-
-  const localPrices = BASE;
-
-  // Calculer les diffs
-  const sig = (p) => `${p.repere}|${p.date}|${p.projet}`;
-  const cacheSet = new Set(cachePrices.map(sig));
-  const localSet = new Set(localPrices.map(sig));
-  const remoteSet = new Set(remotePrices.map(sig));
-
-  // Modifs locales (ce que j'ai ajouté/modifié vs cache)
-  const myAdds = localPrices.filter(p => !cacheSet.has(sig(p)));
-  // Modifs externes (ce que les autres ont ajouté vs cache)
-  const theirAdds = remotePrices.filter(p => !cacheSet.has(sig(p)));
-  // Conflits potentiels : même signature dans les deux mais prix différent
-  const conflicts = [];
-  myAdds.forEach(mp => {
-    const t = theirAdds.find(tp => sig(tp) === sig(mp));
-    if (t && Math.abs(t.prix - mp.prix) > 0.01) {
-      conflicts.push({mine: mp, theirs: t});
-    }
-  });
-  return {
-    remotePrices, cachePrices, localPrices,
-    myAdds, theirAdds, conflicts
+  const result = {
+    remotePrices: [], cachePrices: [], localPrices: BASE,
+    myAdds: [], myModifs: [], myDels: [],
+    theirAdds: [], theirModifs: [], theirDels: [],
+    conflicts: [],
+    error: null,
+    diagnostic: {}
   };
+
+  try {
+    // 1. Lire le fichier officiel
+    const remoteB64 = await window.electronAPI.readFile(linkedExcelPath);
+    if (!remoteB64) {
+      result.error = "Fichier officiel illisible (vide ou inaccessible)";
+      return result;
+    }
+
+    let remoteWb;
+    try {
+      remoteWb = XLSX.read(remoteB64, {type:'base64'});
+    } catch(e) {
+      result.error = "Le fichier officiel n'est pas un Excel valide : " + e.message;
+      return result;
+    }
+
+    const remoteWs = remoteWb.Sheets['BASE_PRIX'];
+    if (!remoteWs) {
+      result.error = `Le fichier officiel ne contient pas de feuille "BASE_PRIX". Feuilles trouvées : ${remoteWb.SheetNames.join(', ')}`;
+      return result;
+    }
+    result.remotePrices = parseBaseSheet(remoteWs);
+    result.diagnostic.remoteCount = result.remotePrices.length;
+
+    // 2. Lire le cache local
+    const cacheB64 = await readFromCache();
+    if (cacheB64) {
+      try {
+        const cacheWb = XLSX.read(cacheB64, {type:'base64'});
+        const cacheWs = cacheWb.Sheets['BASE_PRIX'];
+        if (cacheWs) {
+          result.cachePrices = parseBaseSheet(cacheWs);
+        }
+      } catch(e) {
+        // Cache corrompu : on continue avec un cache vide (toutes les modifs seront "myAdds")
+        console.warn('Cache illisible, comparaison sans cache:', e.message);
+        result.diagnostic.cacheError = e.message;
+      }
+    } else {
+      result.diagnostic.noCache = true;
+    }
+    result.diagnostic.cacheCount = result.cachePrices.length;
+    result.diagnostic.localCount = result.localPrices.length;
+
+    // 3. Calculer les diffs avec 2 niveaux de signature
+    // Signature d'identité : ce qui identifie un prix unique (sans son montant)
+    const idSig = (p) => `${(p.repere||'').trim()}||${(p.date||'').trim()}||${(p.projet||'').trim()}`;
+    // Signature complète : avec montant pour détecter les modifications
+    const fullSig = (p) => `${idSig(p)}||${(p.prix||0).toFixed(2)}||${(p.designation||'').trim()}||${(p.lot||'').trim()}||${(p.unite||'').trim()}`;
+
+    // Maps pour accès rapide
+    const cacheById = new Map();
+    result.cachePrices.forEach(p => cacheById.set(idSig(p), p));
+
+    const localById = new Map();
+    result.localPrices.forEach(p => localById.set(idSig(p), p));
+
+    const remoteById = new Map();
+    result.remotePrices.forEach(p => remoteById.set(idSig(p), p));
+
+    // Mes modifs (vs cache)
+    result.localPrices.forEach(p => {
+      const id = idSig(p);
+      const inCache = cacheById.get(id);
+      if (!inCache) {
+        result.myAdds.push(p);
+      } else if (fullSig(p) !== fullSig(inCache)) {
+        result.myModifs.push({avant: inCache, apres: p});
+      }
+    });
+    // Mes suppressions (présent au cache, plus en local)
+    result.cachePrices.forEach(p => {
+      if (!localById.has(idSig(p))) result.myDels.push(p);
+    });
+
+    // Modifs externes (vs cache)
+    result.remotePrices.forEach(p => {
+      const id = idSig(p);
+      const inCache = cacheById.get(id);
+      if (!inCache) {
+        result.theirAdds.push(p);
+      } else if (fullSig(p) !== fullSig(inCache)) {
+        result.theirModifs.push({avant: inCache, apres: p});
+      }
+    });
+    // Suppressions externes
+    result.cachePrices.forEach(p => {
+      if (!remoteById.has(idSig(p))) result.theirDels.push(p);
+    });
+
+    // Conflits = même identité, modifié des deux côtés avec valeurs différentes
+    result.localPrices.forEach(mp => {
+      const id = idSig(mp);
+      const tp = remoteById.get(id);
+      const cp = cacheById.get(id);
+      if (tp && cp && fullSig(mp) !== fullSig(cp) && fullSig(tp) !== fullSig(cp) && fullSig(mp) !== fullSig(tp)) {
+        // Les deux ont modifié ET de manière différente
+        result.conflicts.push({mine: mp, theirs: tp, base: cp});
+      }
+    });
+    // Conflits sans cache : même identité, prix différent entre local et remote
+    if (result.cachePrices.length === 0) {
+      result.localPrices.forEach(mp => {
+        const id = idSig(mp);
+        const tp = remoteById.get(id);
+        if (tp && fullSig(mp) !== fullSig(tp)) {
+          // Pas déjà compté dans conflits
+          if (!result.conflicts.find(c => idSig(c.mine) === id)) {
+            result.conflicts.push({mine: mp, theirs: tp, base: null});
+          }
+        }
+      });
+    }
+
+    return result;
+  } catch (e) {
+    result.error = "Erreur inattendue : " + e.message;
+    console.error('computeConflict:', e);
+    return result;
+  }
 }
 
 function parseBaseSheet(ws) {
   if (!ws) return [];
   const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+  // Détection auto de la ligne d'en-tête (cherche "Repère" / "Lot" dans les 10 premières lignes)
+  let headerRow = -1;
+  let cols = {rep: 0, lot: 1, desg: 2, unite: 3, prix: 4, date: 5, projet: 6};
+  for (let i = 0; i < Math.min(rows.length, 10); i++) {
+    const r = (rows[i]||[]).map(c => String(c||'').toLowerCase().trim());
+    const repIdx = r.findIndex(c => /^rep[eè]re$/i.test(c));
+    const lotIdx = r.findIndex(c => /^lot$/i.test(c));
+    if (repIdx !== -1 && lotIdx !== -1) {
+      headerRow = i;
+      cols.rep = repIdx;
+      cols.lot = lotIdx;
+      cols.desg = r.findIndex(c => /^d[eé]sign/.test(c));
+      cols.unite = r.findIndex(c => /^(unit|u)$/i.test(c));
+      cols.prix = r.findIndex(c => /^(prix|pu|montant)/i.test(c));
+      cols.date = r.findIndex(c => /^date$/i.test(c));
+      cols.projet = r.findIndex(c => /^(projet|chantier)/i.test(c));
+      break;
+    }
+  }
+  if (headerRow < 0) {
+    // Fallback : ancien format = 3 lignes d'en-tête fixes (titre/sous-titre/vide)
+    headerRow = 3;
+  }
+
   const result = [];
-  for (let i = 3; i < rows.length; i++) {
-    const r = rows[i];
-    if (!r[0] || !r[1]) continue;
-    let date = r[5];
+  for (let i = headerRow + 1; i < rows.length; i++) {
+    const r = rows[i] || [];
+    if (!r[cols.rep] || !r[cols.lot]) continue;
+    let date = r[cols.date];
     if (typeof date === 'number') {
-      const d = XLSX.SSF.parse_date_code(date);
-      date = `${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`;
+      try {
+        const d = XLSX.SSF.parse_date_code(date);
+        date = `${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`;
+      } catch(e) { date = String(date); }
     } else { date = String(date||'').trim(); }
     result.push({
-      repere: String(r[0]||'').trim(),
-      lot:    String(r[1]||'').trim(),
-      designation: String(r[2]||'').trim(),
-      unite:  String(r[3]||'u').trim(),
-      prix:   parseFloat(String(r[4]||'').toString().replace(',','.')) || 0,
+      repere: String(r[cols.rep]||'').trim(),
+      lot:    String(r[cols.lot]||'').trim(),
+      designation: String(r[cols.desg]||'').trim(),
+      unite:  String(r[cols.unite]||'u').trim(),
+      prix:   parseFloat(String(r[cols.prix]||'').toString().replace(',','.')) || 0,
       date:   date,
-      projet: String(r[6]||'').trim()
+      projet: String(r[cols.projet]||'').trim()
     });
   }
   return result;
@@ -2971,36 +3088,148 @@ function parseBaseSheet(ws) {
 
 function openConflictModal() {
   const c = pendingConflictData;
-  $('conflictMineCount').textContent = c.myAdds.length;
-  $('conflictTheirsCount').textContent = c.theirAdds.length;
+  if (!c) {
+    toast('Erreur : données de conflit manquantes', 'rouge', 4000);
+    return;
+  }
+
+  // === Cas erreur ===
+  if (c.error) {
+    $('conflictMineCount').textContent = '?';
+    $('conflictTheirsCount').textContent = '?';
+    $('conflictOverlapCount').textContent = '!';
+    $('conflictDetail').innerHTML = `
+      <div style="background:#f8d7da;color:#721c24;padding:10px;border-radius:5px;margin:8px 0">
+        <strong>❌ Impossible de calculer le détail :</strong><br>
+        ${esc(c.error)}
+        <hr style="margin:8px 0;opacity:.3">
+        <div style="font-size:10px;opacity:.8">
+          Vous pouvez quand même choisir une stratégie, mais nous ne pourrons pas vous montrer ce qui change.
+          <br>Pour rester en sécurité : choisissez "✋ Annuler" puis sauvegardez vos données via Paramètres → Export Backup.
+        </div>
+      </div>`;
+    document.querySelector('input[name="conflictRes"][value="cancel"]').checked = true;
+    openModal('modalConflict');
+    return;
+  }
+
+  // === Cas normal : compteurs ===
+  const totalMine = c.myAdds.length + c.myModifs.length + c.myDels.length;
+  const totalTheirs = c.theirAdds.length + c.theirModifs.length + c.theirDels.length;
+  $('conflictMineCount').textContent = totalMine;
+  $('conflictTheirsCount').textContent = totalTheirs;
   $('conflictOverlapCount').textContent = c.conflicts.length;
-  // Détail
+
+  // === Détail enrichi ===
   let html = '';
+
+  // Diagnostic technique en tête (utile pour debug)
+  if (c.diagnostic) {
+    const d = c.diagnostic;
+    let diagTxt = `📊 <strong>Diagnostic :</strong> Local ${d.localCount||0} prix · Cache ${d.cacheCount||0} prix · Fichier officiel ${d.remoteCount||0} prix`;
+    if (d.noCache) diagTxt += ' <span style="color:#b9770e">· ⚠️ pas de cache (1ère sync ?)</span>';
+    if (d.cacheError) diagTxt += ` <span style="color:#a93226">· cache illisible : ${esc(d.cacheError)}</span>`;
+    html += `<div style="font-size:10px;color:#666;background:var(--card-bg);padding:6px 8px;border-radius:4px;margin-bottom:8px">${diagTxt}</div>`;
+  }
+
+  // Aucun changement détecté
+  if (totalMine === 0 && totalTheirs === 0 && c.conflicts.length === 0) {
+    html += `<div style="background:#fff3cd;color:#856404;padding:10px;border-radius:5px">
+      <strong>🤔 Étrange :</strong> Le hash du fichier a changé, mais aucune différence détectée dans les prix.<br>
+      <span style="font-size:10px">Causes possibles : modification de la mise en forme, métadonnées Excel (auteur, date d'enregistrement),
+      ou données dans des feuilles différentes de BASE_PRIX.</span><br>
+      <span style="font-size:10px">→ Vous pouvez sans risque choisir "🔀 Fusionner" pour resynchroniser.</span>
+    </div>`;
+  }
+
+  // Mes ajouts
   if (c.myAdds.length) {
-    html += `<div style="font-weight:700;margin-bottom:4px;color:#1e8449">VOS AJOUTS (${c.myAdds.length}) :</div>`;
-    c.myAdds.slice(0, 8).forEach(p => {
-      html += `<div class="conflict-line conflict-mine">+ ${esc(p.repere)} · ${esc(p.designation).slice(0,40)} · ${fmtPrix(p.prix)}</div>`;
+    html += `<details open style="margin-bottom:6px"><summary style="cursor:pointer;font-weight:700;color:#1e8449;padding:4px 0">
+      ✚ VOS AJOUTS LOCAUX (${c.myAdds.length})</summary>`;
+    c.myAdds.slice(0, 12).forEach(p => {
+      html += `<div class="conflict-line conflict-mine">+ <strong>${esc(p.repere)}</strong> · ${esc(p.designation).slice(0,50)} · <strong>${fmtPrix(p.prix)}</strong> <span style="opacity:.6">(${esc(p.date)||'?'} - ${esc(p.projet)||'?'})</span></div>`;
     });
-    if (c.myAdds.length > 8) html += `<div style="opacity:.6;padding-left:10px">… et ${c.myAdds.length - 8} autres</div>`;
+    if (c.myAdds.length > 12) html += `<div style="opacity:.6;padding-left:10px">… et ${c.myAdds.length - 12} autres</div>`;
+    html += '</details>';
   }
-  if (c.theirAdds.length) {
-    html += `<div style="font-weight:700;margin:8px 0 4px;color:#c0392b">AJOUTS EXTERNES (${c.theirAdds.length}) :</div>`;
-    c.theirAdds.slice(0, 8).forEach(p => {
-      html += `<div class="conflict-line conflict-theirs">+ ${esc(p.repere)} · ${esc(p.designation).slice(0,40)} · ${fmtPrix(p.prix)}</div>`;
-    });
-    if (c.theirAdds.length > 8) html += `<div style="opacity:.6;padding-left:10px">… et ${c.theirAdds.length - 8} autres</div>`;
-  }
-  if (c.conflicts.length) {
-    html += `<div style="font-weight:700;margin:8px 0 4px;color:#b9770e">⚠️ CONFLITS (${c.conflicts.length}) :</div>`;
-    c.conflicts.slice(0, 5).forEach(cf => {
-      html += `<div class="conflict-line">
-        ${esc(cf.mine.repere)} :
-        <span class="conflict-mine">moi: ${fmtPrix(cf.mine.prix)}</span> ·
-        <span class="conflict-theirs">autre: ${fmtPrix(cf.theirs.prix)}</span>
+
+  // Mes modifications
+  if (c.myModifs.length) {
+    html += `<details open style="margin-bottom:6px"><summary style="cursor:pointer;font-weight:700;color:#0c3a7a;padding:4px 0">
+      ✏️ VOS MODIFICATIONS LOCALES (${c.myModifs.length})</summary>`;
+    c.myModifs.slice(0, 8).forEach(m => {
+      html += `<div class="conflict-line conflict-mine">
+        <strong>${esc(m.apres.repere)}</strong> · ${esc(m.apres.designation).slice(0,40)}<br>
+        <span style="padding-left:14px;opacity:.7">avant : ${fmtPrix(m.avant.prix)} → <strong style="color:#0c3a7a">après : ${fmtPrix(m.apres.prix)}</strong></span>
       </div>`;
     });
+    if (c.myModifs.length > 8) html += `<div style="opacity:.6;padding-left:10px">… et ${c.myModifs.length - 8} autres</div>`;
+    html += '</details>';
   }
-  if (!html) html = '<div style="color:#888;font-style:italic">Aucune différence détectée (étrange...)</div>';
+
+  // Mes suppressions
+  if (c.myDels.length) {
+    html += `<details style="margin-bottom:6px"><summary style="cursor:pointer;font-weight:700;color:#a93226;padding:4px 0">
+      🗑 VOS SUPPRESSIONS LOCALES (${c.myDels.length})</summary>`;
+    c.myDels.slice(0, 8).forEach(p => {
+      html += `<div class="conflict-line">- <strong>${esc(p.repere)}</strong> · ${esc(p.designation).slice(0,50)} · ${fmtPrix(p.prix)}</div>`;
+    });
+    if (c.myDels.length > 8) html += `<div style="opacity:.6;padding-left:10px">… et ${c.myDels.length - 8} autres</div>`;
+    html += '</details>';
+  }
+
+  // Ajouts externes
+  if (c.theirAdds.length) {
+    html += `<details open style="margin-bottom:6px"><summary style="cursor:pointer;font-weight:700;color:#c0392b;padding:4px 0">
+      ✚ AJOUTS EXTERNES (autre utilisateur) (${c.theirAdds.length})</summary>`;
+    c.theirAdds.slice(0, 12).forEach(p => {
+      html += `<div class="conflict-line conflict-theirs">+ <strong>${esc(p.repere)}</strong> · ${esc(p.designation).slice(0,50)} · <strong>${fmtPrix(p.prix)}</strong> <span style="opacity:.6">(${esc(p.date)||'?'} - ${esc(p.projet)||'?'})</span></div>`;
+    });
+    if (c.theirAdds.length > 12) html += `<div style="opacity:.6;padding-left:10px">… et ${c.theirAdds.length - 12} autres</div>`;
+    html += '</details>';
+  }
+
+  // Modifications externes
+  if (c.theirModifs.length) {
+    html += `<details open style="margin-bottom:6px"><summary style="cursor:pointer;font-weight:700;color:#9b59b6;padding:4px 0">
+      ✏️ MODIFICATIONS EXTERNES (${c.theirModifs.length})</summary>`;
+    c.theirModifs.slice(0, 8).forEach(m => {
+      html += `<div class="conflict-line conflict-theirs">
+        <strong>${esc(m.apres.repere)}</strong> · ${esc(m.apres.designation).slice(0,40)}<br>
+        <span style="padding-left:14px;opacity:.7">avant : ${fmtPrix(m.avant.prix)} → <strong style="color:#9b59b6">après : ${fmtPrix(m.apres.prix)}</strong></span>
+      </div>`;
+    });
+    if (c.theirModifs.length > 8) html += `<div style="opacity:.6;padding-left:10px">… et ${c.theirModifs.length - 8} autres</div>`;
+    html += '</details>';
+  }
+
+  // Suppressions externes
+  if (c.theirDels.length) {
+    html += `<details style="margin-bottom:6px"><summary style="cursor:pointer;font-weight:700;color:#c0392b;padding:4px 0">
+      🗑 SUPPRESSIONS EXTERNES (${c.theirDels.length})</summary>`;
+    c.theirDels.slice(0, 8).forEach(p => {
+      html += `<div class="conflict-line">- <strong>${esc(p.repere)}</strong> · ${esc(p.designation).slice(0,50)} · ${fmtPrix(p.prix)}</div>`;
+    });
+    if (c.theirDels.length > 8) html += `<div style="opacity:.6;padding-left:10px">… et ${c.theirDels.length - 8} autres</div>`;
+    html += '</details>';
+  }
+
+  // CONFLITS RÉELS (modifié des deux côtés)
+  if (c.conflicts.length) {
+    html += `<details open style="margin-bottom:6px"><summary style="cursor:pointer;font-weight:700;color:#b9770e;padding:4px 0;background:#fff3cd;padding:6px 8px;border-radius:4px">
+      ⚠️ CONFLITS RÉELS — modifié des deux côtés (${c.conflicts.length})</summary>`;
+    c.conflicts.slice(0, 10).forEach(cf => {
+      html += `<div class="conflict-line" style="background:#fffaf0;padding:6px;margin:3px 0;border-radius:4px;border-left:3px solid #b9770e">
+        <strong>${esc(cf.mine.repere)}</strong> — ${esc(cf.mine.designation).slice(0,40)}<br>
+        ${cf.base ? `<span style="padding-left:14px;font-size:10px;color:#666">📌 base commune : ${fmtPrix(cf.base.prix)}</span><br>` : ''}
+        <span style="padding-left:14px"><span class="conflict-mine">🏠 vous : <strong>${fmtPrix(cf.mine.prix)}</strong></span> ·
+        <span class="conflict-theirs">🌍 autre : <strong>${fmtPrix(cf.theirs.prix)}</strong></span></span>
+      </div>`;
+    });
+    if (c.conflicts.length > 10) html += `<div style="opacity:.6;padding-left:10px">… et ${c.conflicts.length - 10} autres</div>`;
+    html += '</details>';
+  }
+
   $('conflictDetail').innerHTML = html;
   // Présélection
   document.querySelector('input[name="conflictRes"][value="merge"]').checked = true;
@@ -3022,35 +3251,76 @@ async function resolveConflict() {
   }
 
   if (choice === 'mine') {
-    // BASE = local actuel + ajouts externes ignorés
-    // Pas de changement à BASE
+    // BASE = local actuel — pas de changement
   } else if (choice === 'theirs') {
-    // BASE = remote
+    // BASE = remote (on adopte tout du fichier officiel)
     BASE = [...c.remotePrices];
   } else if (choice === 'merge') {
-    // BASE = union, conflits = les deux versions
-    const sig = (p) => `${p.repere}|${p.date}|${p.projet}|${p.prix}`;
+    // Fusion intelligente :
+    // 1. Partir de BASE local
+    // 2. Ajouter les ajouts externes qui ne sont pas déjà chez nous
+    // 3. Appliquer les modifications externes pour les prix qu'on n'a PAS modifiés nous-mêmes
+    const idSig = (p) => `${(p.repere||'').trim()}||${(p.date||'').trim()}||${(p.projet||'').trim()}`;
+    const fullSig = (p) => `${idSig(p)}||${(p.prix||0).toFixed(2)}||${(p.designation||'').trim()}`;
+
     const merged = [...c.localPrices];
-    const localSigs = new Set(merged.map(sig));
+    const mergedById = new Map();
+    merged.forEach((p, idx) => mergedById.set(idSig(p), {p, idx}));
+
+    // Identifier ce qu'on a modifié nous-mêmes (pour ne pas écraser)
+    const myModifIds = new Set(c.myModifs.map(m => idSig(m.apres)));
+    // Identifier nos suppressions (pour ne pas réintroduire)
+    const myDelIds = new Set(c.myDels.map(p => idSig(p)));
+
+    // Ajouts externes : on les rajoute s'ils ne sont pas déjà chez nous (via signature complète)
     c.theirAdds.forEach(p => {
-      if (!localSigs.has(sig(p))) merged.push(p);
+      const id = idSig(p);
+      if (!mergedById.has(id) && !myDelIds.has(id)) {
+        merged.push(p);
+        mergedById.set(id, {p, idx: merged.length - 1});
+      }
     });
+
+    // Modifications externes : on les applique sauf si on l'a aussi modifié nous-mêmes (= conflit)
+    c.theirModifs.forEach(m => {
+      const id = idSig(m.apres);
+      if (myModifIds.has(id)) return; // C'est un conflit géré ci-dessous
+      if (myDelIds.has(id)) return; // On l'a supprimé volontairement
+      const existing = mergedById.get(id);
+      if (existing) {
+        // Remplacer dans merged (on garde notre lot/désignation si on les a modifiés ? ici on prend la version externe car on n'avait pas touché)
+        merged[existing.idx] = m.apres;
+      }
+    });
+
+    // Conflits réels : pour chaque conflit, on garde NOTRE version + on ajoute la version distante avec un suffixe sur le projet
+    c.conflicts.forEach(cf => {
+      // Ajouter la version distante comme un nouvel enregistrement (suffixe sur projet pour ne pas écraser)
+      const dup = {...cf.theirs, projet: (cf.theirs.projet || '') + ' [autre utilisateur]'};
+      merged.push(dup);
+    });
+
     BASE = merged;
   }
 
   closeModal('modalConflict');
   pendingConflictData = null;
   save(true);
-  initUI(); renderBase(); renderAccueil();
+  initUI(); renderBase(); renderAccueil(); renderRatios();
+  updateUndoRedoButtons();
 
   // Pousser vers Excel
-  await pushToExcel();
-  await copyLinkedToCache();
-  const newH = await getRemoteFileHash();
-  await setCachedHash(newH);
-  dirtyChanges = [];
-  updateLinkBar();
-  toast('✅ Conflit résolu et synchronisé', 'vert', 3500);
+  try {
+    await pushToExcel();
+    await copyLinkedToCache();
+    const newH = await getRemoteFileHash();
+    await setCachedHash(newH);
+    dirtyChanges = [];
+    updateLinkBar();
+    toast('✅ Conflit résolu et synchronisé', 'vert', 3500);
+  } catch (e) {
+    toast('⚠️ Conflit résolu localement mais sync échouée : ' + e.message, 'rouge', 6000);
+  }
 }
 
 
