@@ -60,6 +60,8 @@ kbd{display:inline-block;background:var(--bg);border:1px solid var(--bord);borde
 .link-bar.unlinked{background:#7a3030}
 .link-bar.offline{background:#7a5d18}
 .link-bar.modified{background:#1f618d}
+.link-bar.external-mod{background:#6a1b9a;animation:pulse-external 2s ease-in-out infinite}
+@keyframes pulse-external{0%,100%{background:#6a1b9a}50%{background:#8e44ad}}
 .link-bar .lb-status{font-weight:700;letter-spacing:.3px}
 .link-bar .lb-path{flex:1;font-family:'Consolas',monospace;font-size:10px;opacity:.85;
                    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -715,7 +717,7 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
 
     <div style="margin-top:24px;padding-top:12px;border-top:1px dashed var(--bord);
                 text-align:center;font-size:10px;color:#999;font-style:italic;line-height:1.6">
-      Base de Prix &nbsp;•&nbsp; Version <span id="appVerLbl">2.5.1</span><br>
+      Base de Prix &nbsp;•&nbsp; Version <span id="appVerLbl">2.5.2</span><br>
       Créé par <strong style="color:#666;font-style:normal">Nathan RAMEDACE</strong>
     </div>
   </div>
@@ -1087,6 +1089,19 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
   </div>
 </div>
 
+<!-- v2.5.2 Popup détail anomalie -->
+<div class="modal-bg" id="modalAnomaly" data-modal="anomaly">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-title" id="anomalyTitle">⚠️ Prix anormal</div>
+    <div id="anomalyContent" style="margin-top:8px"></div>
+    <div class="modal-foot">
+      <button class="btn btn-gris" onclick="closeModal('modalAnomaly')">Fermer</button>
+      <button class="btn btn-bleu" onclick="editAnomalyPrice()">✏️ Modifier le prix</button>
+      <button class="btn btn-vert" onclick="confirmAnomalyNormal()">✅ C'est normal, ne plus afficher</button>
+    </div>
+  </div>
+</div>
+
 <!-- v2.5+ Aide raccourcis clavier -->
 <div class="modal-bg" id="modalHelp" data-modal="help">
   <div class="modal" style="max-width:680px">
@@ -1147,7 +1162,7 @@ body.dark .dd-item.success:hover{background:#1d3d2a}
 /* ============================================================
    ★ v2.5 ★ CONSTANTES & ÉTAT GLOBAL
    ============================================================ */
-const APP_VERSION = '2.5.1';
+const APP_VERSION = '2.5.2';
 
 // Lots par défaut (utilisés si pas de personnalisation)
 const DEFAULT_LOTS = [
@@ -1171,6 +1186,7 @@ PREFS.autoSync    = PREFS.autoSync !== false;              // ★ v2.3 (true par
 PREFS.checkExternal = PREFS.checkExternal !== false;       // ★ v2.3
 PREFS.autoSnapshot  = PREFS.autoSnapshot !== false;        // ★ v2.3
 PREFS.ratioExclusions = PREFS.ratioExclusions || [];       // ★ v2.5+ : signatures de prix exclus du calcul de ratio
+PREFS.anomalyExclusions = PREFS.anomalyExclusions || [];   // ★ v2.5.2 : signatures de prix marqués "C'est normal"
 
 // LOTS = liste active (référence dynamique vers PREFS.lots)
 let LOTS = PREFS.lots;
@@ -1201,6 +1217,7 @@ let cacheSnapshotHash = localStorage.getItem('cacheSnapshotHash') || null; // ha
 let dirtyChanges = []; // liste des modifs locales non syncées
 let isOffline = false;
 let externalCheckInterval = null;
+let externalChangeDetected = false; // ★ v2.5.2 : true si polling 60s a vu une modif externe non encore résolue
 let pendingLinkData = null;  // pour la modale de choix
 
 // ★ v2.3 — Détection conflit
@@ -1230,14 +1247,21 @@ let syncDebounce    = null;
 function save(skipSync) {
   localStorage.setItem('bp', JSON.stringify(BASE));
   // Nettoyer les exclusions orphelines (prix qui n'existent plus dans BASE)
+  let prefsChanged = false;
   if (PREFS.ratioExclusions && PREFS.ratioExclusions.length) {
     const validSigs = new Set(BASE.map(r => priceSignature(r)));
     const before = PREFS.ratioExclusions.length;
     PREFS.ratioExclusions = PREFS.ratioExclusions.filter(s => validSigs.has(s));
-    if (PREFS.ratioExclusions.length !== before) {
-      localStorage.setItem('bp_prefs', JSON.stringify(PREFS));
-    }
+    if (PREFS.ratioExclusions.length !== before) prefsChanged = true;
   }
+  if (PREFS.anomalyExclusions && PREFS.anomalyExclusions.length) {
+    // Marquage anomalie : signature inclut le prix → si le prix change ou la ligne n'existe plus, on nettoie
+    const validSigs = new Set(BASE.map(r => anomalySignature(r)));
+    const before = PREFS.anomalyExclusions.length;
+    PREFS.anomalyExclusions = PREFS.anomalyExclusions.filter(s => validSigs.has(s));
+    if (PREFS.anomalyExclusions.length !== before) prefsChanged = true;
+  }
+  if (prefsChanged) localStorage.setItem('bp_prefs', JSON.stringify(PREFS));
   if (!skipSync) scheduleSync();
 }
 function $ (id){ return document.getElementById(id); }
@@ -1650,7 +1674,7 @@ function renderBase(){
     `<thead><tr>${headHtml}</tr></thead>
      <tbody>${d.map((r)=>{
        const i = BASE.indexOf(r);
-       const anom = isAnomaly(r) ? ' <span class="anomaly-icon" title="Prix anormal vs historique">⚠️</span>' : '';
+       const anom = isAnomaly(r) ? ` <span class="anomaly-icon" title="Cliquer pour voir le détail" onclick="event.stopPropagation();openAnomalyPopup(${i})">⚠️</span>` : '';
        return `<tr data-idx="${i}">
         <td class="editable" data-field="repere"><strong>${esc(r.repere)}</strong></td>
         <td><span class="badge" style="background:${lotColor(r.lot)}22;color:${lotColor(r.lot)}">${lotShort(r.lot)}</span></td>
@@ -1832,13 +1856,109 @@ function checkAjPrice() {
   }
 }
 
+function anomalySignature(r) {
+  // Signature unique d'un prix pour le marquage "C'est normal"
+  // ⚠️ Inclut le prix : si le prix change, le marquage saute (réévaluation)
+  return `${(r.repere||'').trim()}||${(r.date||'').trim()}||${(r.projet||'').trim()}||${(r.prix||0).toFixed(2)}`;
+}
+function isAnomalyMarkedNormal(r) {
+  return (PREFS.anomalyExclusions || []).indexOf(anomalySignature(r)) !== -1;
+}
+function markAnomalyNormal(r) {
+  if (!PREFS.anomalyExclusions) PREFS.anomalyExclusions = [];
+  const sig = anomalySignature(r);
+  if (PREFS.anomalyExclusions.indexOf(sig) === -1) {
+    PREFS.anomalyExclusions.push(sig);
+    localStorage.setItem('bp_prefs', JSON.stringify(PREFS));
+  }
+}
+
 function isAnomaly(r) {
+  if (isAnomalyMarkedNormal(r)) return false;
   const matchs = BASE.filter(x => x.repere === r.repere);
   if (matchs.length < 3) return false;
   const others = matchs.filter(x => x !== r).map(x => x.prix);
   if (!others.length) return false;
   const min = Math.min(...others), max = Math.max(...others);
   return r.prix < min * 0.5 || r.prix > max * 2;
+}
+
+function getAnomalyStats(r) {
+  // Renvoie les stats complètes pour la popup
+  const matchs = BASE.filter(x => x.repere === r.repere && x !== r);
+  if (!matchs.length) return null;
+  const prix = matchs.map(x => x.prix);
+  const min = Math.min(...prix), max = Math.max(...prix);
+  const moy = prix.reduce((a,b) => a+b, 0) / prix.length;
+  const median = [...prix].sort((a,b) => a-b)[Math.floor(prix.length/2)];
+  // 3 derniers prix datés (les plus récents)
+  const recents = [...matchs].sort((a,b) => (b.date||'').localeCompare(a.date||'')).slice(0, 3);
+  // Calcul de l'écart vs moyenne
+  const ecart = ((r.prix - moy) / moy * 100);
+  // Description
+  let cause = '';
+  if (r.prix > max * 2)      cause = `+${((r.prix - max) / max * 100).toFixed(0)}% au-dessus du max historique (${fmtPrix(max)})`;
+  else if (r.prix < min * 0.5) cause = `-${((min - r.prix) / min * 100).toFixed(0)}% en-dessous du min historique (${fmtPrix(min)})`;
+  return {min, max, moy, median, ecart, recents, cause, count: matchs.length};
+}
+
+function openAnomalyPopup(idx) {
+  const r = BASE[idx];
+  if (!r) return;
+  const s = getAnomalyStats(r);
+  if (!s) return;
+  $('anomalyTitle').textContent = `⚠️ Prix anormal : ${r.repere}`;
+  $('anomalyContent').innerHTML = `
+    <div style="background:#fff3cd;color:#856404;padding:8px 10px;border-radius:5px;margin-bottom:10px;font-size:11px">
+      <strong>Désignation :</strong> ${esc(r.designation)}<br>
+      <strong>Prix actuel :</strong> <span style="font-size:14px;color:#a93226;font-weight:700">${fmtPrix(r.prix)}</span>
+      ${r.date ? `<br><span style="opacity:.8">Date : ${esc(r.date)} · Projet : ${esc(r.projet)||'—'}</span>` : ''}
+      <br><br>
+      <strong>📌 ${s.cause}</strong>
+    </div>
+    <div style="border:1px solid var(--bord);border-radius:5px;padding:8px 10px;margin-bottom:8px">
+      <div style="font-weight:700;color:var(--bleu);font-size:11px;margin-bottom:5px">📊 Historique pour ce repère (${s.count} autres prix)</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px">
+        <div>Min : <strong>${fmtPrix(s.min)}</strong></div>
+        <div>Max : <strong>${fmtPrix(s.max)}</strong></div>
+        <div>Moyenne : <strong style="color:#085041">${fmtPrix(s.moy)}</strong></div>
+        <div>Médiane : <strong>${fmtPrix(s.median)}</strong></div>
+      </div>
+      <div style="margin-top:6px;font-size:10px;color:#666">
+        Écart vs moyenne : <strong style="color:${Math.abs(s.ecart)>50?'#a93226':'#b9770e'}">${s.ecart>=0?'+':''}${s.ecart.toFixed(1)}%</strong>
+      </div>
+    </div>
+    ${s.recents.length ? `
+      <div style="border:1px solid var(--bord);border-radius:5px;padding:8px 10px;margin-bottom:8px">
+        <div style="font-weight:700;color:var(--bleu);font-size:11px;margin-bottom:5px">🕒 Derniers prix de référence</div>
+        ${s.recents.map(p => `
+          <div style="font-size:10px;padding:2px 0;border-bottom:1px dotted var(--bord)">
+            <span style="color:#888">${esc(p.date)||'—'}</span> ·
+            <span>${esc(p.projet)||'—'}</span> ·
+            <strong style="color:#085041">${fmtPrix(p.prix)}</strong>
+          </div>`).join('')}
+      </div>` : ''}
+    <div style="font-size:10px;color:#666;font-style:italic">
+      💡 Si ce prix est légitime (chantier exceptionnel, condition particulière...), cliquez sur "C'est normal" pour ne plus voir cet avertissement.
+      Le marquage sautera automatiquement si le prix est ensuite modifié.
+    </div>`;
+  // Stocker l'index pour les actions
+  window._anomalyIdx = idx;
+  openModal('modalAnomaly');
+}
+function confirmAnomalyNormal() {
+  const idx = window._anomalyIdx;
+  if (idx === undefined || !BASE[idx]) { closeModal('modalAnomaly'); return; }
+  markAnomalyNormal(BASE[idx]);
+  closeModal('modalAnomaly');
+  toast(`✅ "${BASE[idx].repere}" marqué comme normal`, 'vert', 2500);
+  renderBase();
+  renderRatios();
+}
+function editAnomalyPrice() {
+  const idx = window._anomalyIdx;
+  closeModal('modalAnomaly');
+  if (idx !== undefined && BASE[idx]) openEdit(idx);
 }
 
 function enregistrer(){
@@ -2698,6 +2818,12 @@ function updateLinkBar(){
     status.textContent = '⚠️ Hors-ligne';
     path.textContent = 'Fichier inaccessible : ' + linkedExcelPath;
     extra.innerHTML = `<button onclick="forceSync()">🔄 Réessayer</button>`;
+  } else if (externalChangeDetected) {
+    // ★ v2.5.2 : un autre utilisateur a modifié le fichier
+    bar.className = 'link-bar external-mod';
+    status.textContent = '🌍 Modifié par un autre utilisateur';
+    path.textContent = fname;
+    extra.innerHTML = `<button onclick="forceSync()">🔄 Synchroniser et résoudre</button>`;
   } else if (dirtyChanges.length > 0) {
     bar.className = 'link-bar modified';
     status.textContent = '✏️ Modifications non syncées';
@@ -2876,24 +3002,34 @@ async function syncToExcel(forced) {
     }
     isOffline = false;
 
-    // 2. Comparer hash actuel vs snapshot
+    // 2. Comparer hash actuel du fichier officiel vs hash mémorisé du cache
+    //    Si différents = quelqu'un a modifié le fichier depuis notre dernière sync
     const currentHash = await getRemoteFileHash();
     const snapHash = await getCachedHash();
 
+    console.log('[sync] hash officiel actuel :', currentHash);
+    console.log('[sync] hash cache mémorisé :', snapHash);
+    console.log('[sync] forced =', !!forced);
+
     if (snapHash && currentHash && currentHash !== snapHash) {
-      // ★ CONFLIT DÉTECTÉ — ouvrir la modale
+      // ★ CONFLIT DÉTECTÉ — quelqu'un a modifié le fichier officiel
+      // Calculer la nature exacte des changements
+      console.log('[sync] CONFLIT DÉTECTÉ → ouverture modale');
       pendingConflictData = await computeConflict();
       syncInProgress = false;
       openConflictModal();
       return;
     }
 
-    // 3. Pas de conflit : push direct
+    // 3. Pas de conflit : push direct, puis mise à jour du cache
     await pushToExcel();
+    // ⚠️ Mettre à jour le cache APRÈS le push pour qu'il reflète le nouvel état officiel
     await copyLinkedToCache();
     const newH = await getRemoteFileHash();
     await setCachedHash(newH);
+    console.log('[sync] PUSH OK, nouveau hash mémorisé :', newH);
     dirtyChanges = [];
+    externalChangeDetected = false; // ★ v2.5.2 reset
     updateLinkBar();
     if (forced) toast('✅ Synchronisé', 'vert');
   } catch (e) {
@@ -2914,13 +3050,13 @@ async function computeConflict() {
   };
 
   try {
-    // 1. Lire le fichier officiel
+    // === LECTURE DES 3 SOURCES DE VÉRITÉ ===
+    // 1. OFFICIEL : ce qui est sur le NAS/disque maintenant
     const remoteB64 = await window.electronAPI.readFile(linkedExcelPath);
     if (!remoteB64) {
       result.error = "Fichier officiel illisible (vide ou inaccessible)";
       return result;
     }
-
     let remoteWb;
     try {
       remoteWb = XLSX.read(remoteB64, {type:'base64'});
@@ -2928,7 +3064,6 @@ async function computeConflict() {
       result.error = "Le fichier officiel n'est pas un Excel valide : " + e.message;
       return result;
     }
-
     const remoteWs = remoteWb.Sheets['BASE_PRIX'];
     if (!remoteWs) {
       result.error = `Le fichier officiel ne contient pas de feuille "BASE_PRIX". Feuilles trouvées : ${remoteWb.SheetNames.join(', ')}`;
@@ -2937,7 +3072,8 @@ async function computeConflict() {
     result.remotePrices = parseBaseSheet(remoteWs);
     result.diagnostic.remoteCount = result.remotePrices.length;
 
-    // 2. Lire le cache local
+    // 2. CACHE : ce que l'app a vu comme "officiel" la dernière fois
+    //    C'est la RÉFÉRENCE pour distinguer mes modifs des leurs
     const cacheB64 = await readFromCache();
     if (cacheB64) {
       try {
@@ -2947,7 +3083,6 @@ async function computeConflict() {
           result.cachePrices = parseBaseSheet(cacheWs);
         }
       } catch(e) {
-        // Cache corrompu : on continue avec un cache vide (toutes les modifs seront "myAdds")
         console.warn('Cache illisible, comparaison sans cache:', e.message);
         result.diagnostic.cacheError = e.message;
       }
@@ -2957,74 +3092,91 @@ async function computeConflict() {
     result.diagnostic.cacheCount = result.cachePrices.length;
     result.diagnostic.localCount = result.localPrices.length;
 
-    // 3. Calculer les diffs avec 2 niveaux de signature
-    // Signature d'identité : ce qui identifie un prix unique (sans son montant)
+    // === SIGNATURES ===
+    // Identité = ce qui rend un prix unique (sans son montant ni sa désignation)
     const idSig = (p) => `${(p.repere||'').trim()}||${(p.date||'').trim()}||${(p.projet||'').trim()}`;
-    // Signature complète : avec montant pour détecter les modifications
-    const fullSig = (p) => `${idSig(p)}||${(p.prix||0).toFixed(2)}||${(p.designation||'').trim()}||${(p.lot||'').trim()}||${(p.unite||'').trim()}`;
+    // Contenu = ce qui peut différer entre versions du même prix
+    const contentSig = (p) => `${(p.prix||0).toFixed(2)}||${(p.designation||'').trim()}||${(p.lot||'').trim()}||${(p.unite||'').trim()}`;
 
-    // Maps pour accès rapide
+    // === MAPS POUR ACCÈS RAPIDE ===
     const cacheById = new Map();
     result.cachePrices.forEach(p => cacheById.set(idSig(p), p));
-
     const localById = new Map();
     result.localPrices.forEach(p => localById.set(idSig(p), p));
-
     const remoteById = new Map();
     result.remotePrices.forEach(p => remoteById.set(idSig(p), p));
 
-    // Mes modifs (vs cache)
+    // === MES MODIFICATIONS (LOCAL vs CACHE) ===
+    // Tout ce que j'ai changé depuis le dernier sync
     result.localPrices.forEach(p => {
       const id = idSig(p);
       const inCache = cacheById.get(id);
       if (!inCache) {
+        // J'ai ajouté ce prix
         result.myAdds.push(p);
-      } else if (fullSig(p) !== fullSig(inCache)) {
+      } else if (contentSig(p) !== contentSig(inCache)) {
+        // J'ai modifié ce prix existant
         result.myModifs.push({avant: inCache, apres: p});
       }
     });
-    // Mes suppressions (présent au cache, plus en local)
+    // Mes suppressions : présent dans cache, plus dans local
     result.cachePrices.forEach(p => {
       if (!localById.has(idSig(p))) result.myDels.push(p);
     });
 
-    // Modifs externes (vs cache)
+    // === MODIFICATIONS EXTERNES (REMOTE vs CACHE) ===
+    // Tout ce que les autres ont changé pendant que je travaillais
     result.remotePrices.forEach(p => {
       const id = idSig(p);
       const inCache = cacheById.get(id);
       if (!inCache) {
+        // Quelqu'un a ajouté ce prix
         result.theirAdds.push(p);
-      } else if (fullSig(p) !== fullSig(inCache)) {
+      } else if (contentSig(p) !== contentSig(inCache)) {
+        // Quelqu'un a modifié ce prix existant
         result.theirModifs.push({avant: inCache, apres: p});
       }
     });
-    // Suppressions externes
+    // Suppressions externes : présent dans cache, plus dans remote
     result.cachePrices.forEach(p => {
       if (!remoteById.has(idSig(p))) result.theirDels.push(p);
     });
 
-    // Conflits = même identité, modifié des deux côtés avec valeurs différentes
-    result.localPrices.forEach(mp => {
-      const id = idSig(mp);
-      const tp = remoteById.get(id);
-      const cp = cacheById.get(id);
-      if (tp && cp && fullSig(mp) !== fullSig(cp) && fullSig(tp) !== fullSig(cp) && fullSig(mp) !== fullSig(tp)) {
-        // Les deux ont modifié ET de manière différente
-        result.conflicts.push({mine: mp, theirs: tp, base: cp});
+    // === CONFLITS RÉELS ===
+    // Un prix qui apparaît dans MES modifs ET dans LEURS modifs avec des valeurs différentes
+    const myModifIds = new Set(result.myModifs.map(m => idSig(m.apres)));
+    const theirModifIds = new Set(result.theirModifs.map(m => idSig(m.apres)));
+    // Intersection
+    const conflictIds = [...myModifIds].filter(id => theirModifIds.has(id));
+    conflictIds.forEach(id => {
+      const mine = result.myModifs.find(m => idSig(m.apres) === id);
+      const theirs = result.theirModifs.find(m => idSig(m.apres) === id);
+      if (mine && theirs && contentSig(mine.apres) !== contentSig(theirs.apres)) {
+        result.conflicts.push({
+          mine: mine.apres,
+          theirs: theirs.apres,
+          base: mine.avant  // = theirs.avant car même cache
+        });
       }
     });
-    // Conflits sans cache : même identité, prix différent entre local et remote
-    if (result.cachePrices.length === 0) {
-      result.localPrices.forEach(mp => {
-        const id = idSig(mp);
-        const tp = remoteById.get(id);
-        if (tp && fullSig(mp) !== fullSig(tp)) {
-          // Pas déjà compté dans conflits
-          if (!result.conflicts.find(c => idSig(c.mine) === id)) {
-            result.conflicts.push({mine: mp, theirs: tp, base: null});
-          }
-        }
-      });
+
+    // Conflits entre MES ajouts et LEURS ajouts (rare : même repère/date/projet ajoutés simultanément avec valeurs différentes)
+    result.myAdds.forEach(mp => {
+      const id = idSig(mp);
+      const theirAdd = result.theirAdds.find(tp => idSig(tp) === id);
+      if (theirAdd && contentSig(mp) !== contentSig(theirAdd)) {
+        result.conflicts.push({
+          mine: mp,
+          theirs: theirAdd,
+          base: null
+        });
+      }
+    });
+
+    // Cas spécial : pas de cache (1ère sync) → on compare local vs remote directement
+    if (result.cachePrices.length === 0 && !result.diagnostic.cacheError) {
+      // On ne peut pas distinguer modifs/ajouts → on traite tout comme conflit potentiel
+      // Les ajouts mutuels avec valeurs différentes sont déjà détectés au-dessus
     }
 
     return result;
@@ -3316,6 +3468,7 @@ async function resolveConflict() {
     const newH = await getRemoteFileHash();
     await setCachedHash(newH);
     dirtyChanges = [];
+    externalChangeDetected = false; // ★ v2.5.2 reset
     updateLinkBar();
     toast('✅ Conflit résolu et synchronisé', 'vert', 3500);
   } catch (e) {
@@ -3421,14 +3574,17 @@ function setupExternalCheck() {
     const cur = await getRemoteFileHash();
     const snap = await getCachedHash();
     if (snap && cur && cur !== snap && !pendingConflictData) {
-      // Modif externe détectée silencieusement
-      if (dirtyChanges.length === 0) {
-        // On peut réimporter sans conflit (on n'a rien modifié localement)
-        toast('🔄 Modification externe détectée, rechargement...', 'bleu', 3500);
-        await reloadFromExcel();
-      } else {
-        toast('⚠️ Modification externe détectée. Sync pour gérer le conflit.', 'orange', 5000);
+      // ★ v2.5.2 : DÉTECTION PASSIVE — on PRÉVIENT, on ne RECHARGE JAMAIS
+      // Toute adoption de modification externe doit passer par la modale conflit (sync explicite)
+      if (!externalChangeDetected) {
+        externalChangeDetected = true;
+        toast('⚠️ Modification externe détectée. Faites Ctrl+S pour gérer le conflit.', 'orange', 6000);
+        updateLinkBar();
       }
+    } else if (snap && cur && cur === snap && externalChangeDetected) {
+      // L'autre utilisateur a peut-être annulé sa modif
+      externalChangeDetected = false;
+      updateLinkBar();
     }
   }, 60000);
 }
